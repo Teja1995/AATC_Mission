@@ -124,6 +124,7 @@ button, input, select {
 
 .btn:hover:not(:disabled) { border-color: var(--muted); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-small { padding: 6px 10px; font-size: 12px; }
 
 .btn-primary {
   width: 100%;

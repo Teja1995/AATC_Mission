@@ -20,6 +20,11 @@ service cloud.firestore {
       allow write: if isCommander();
     }
 
+    match /missionControl/{setting} {
+      allow read: if signedIn();
+      allow write: if isCommander();
+    }
+
     match /completions/{docId} {
       allow read: if signedIn();
       allow create: if signedIn()

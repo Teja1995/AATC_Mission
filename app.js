@@ -79,6 +79,7 @@ const state = {
   missionDay: null,
   completions: new Map(),
   unsubscribers: [],
+  dayUnsubscribers: [],
   previousSession: null,
   pulseSession: null,
 };
@@ -272,12 +273,13 @@ async function markDone(sessionNumber, testKey) {
 
 function clearSubscriptions() {
   state.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
+  state.dayUnsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
 }
 
 function subscribeToDay() {
-  clearSubscriptions();
+  state.dayUnsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
   const dayRef = doc(db, "missionDay", String(state.day));
-  state.unsubscribers.push(onSnapshot(dayRef, (snapshot) => {
+  state.dayUnsubscribers.push(onSnapshot(dayRef, (snapshot) => {
     state.missionDay = snapshot.exists() ? snapshot.data() : null;
     const saved = state.missionDay?.wakeUpTime;
     $("last-saved").textContent = saved ? `Day ${state.day} anchor = ${utcString(new Date(saved))}` : "Not set";
@@ -285,11 +287,45 @@ function subscribeToDay() {
   }, (error) => showToast(`Mission day unavailable: ${error.message}`, true)));
 
   const completionsQuery = query(collection(db, "completions"), where("dayNumber", "==", state.day));
-  state.unsubscribers.push(onSnapshot(completionsQuery, (snapshot) => {
+  state.dayUnsubscribers.push(onSnapshot(completionsQuery, (snapshot) => {
     state.completions = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
     renderSessions();
     renderDashboard();
   }, (error) => showToast(`Dashboard unavailable: ${error.message}`, true)));
+}
+
+function subscribeToActiveDay() {
+  const activeDayRef = doc(db, "missionControl", "current");
+  state.unsubscribers.push(onSnapshot(activeDayRef, (snapshot) => {
+    if (!snapshot.exists()) return;
+    const activeDay = Number(snapshot.data().dayNumber);
+    if (!Number.isInteger(activeDay) || activeDay < 1 || activeDay > 7 || activeDay === state.day) return;
+    state.day = activeDay;
+    $("day-select").value = String(activeDay);
+    state.previousSession = null;
+    state.pulseSession = null;
+    subscribeToDay();
+    renderDashboard();
+  }, (error) => showToast(`Active mission day unavailable: ${error.message}`, true)));
+}
+
+async function setActiveDay() {
+  const dayNumber = Number($("day-select").value);
+  try {
+    await setDoc(doc(db, "missionControl", "current"), {
+      dayNumber,
+      setBy: state.user.uid,
+      updatedAt: new Date().toISOString(),
+    });
+    state.day = dayNumber;
+    state.previousSession = null;
+    state.pulseSession = null;
+    subscribeToDay();
+    renderDashboard();
+    showToast(`Mission Day ${dayNumber} is now active.`);
+  } catch (error) {
+    showToast(`Could not set active day: ${error.message}`, true);
+  }
 }
 
 async function setMissionTime(reset = false) {
@@ -341,13 +377,7 @@ function configureUi() {
     }
   });
   $("logout-btn").addEventListener("click", () => signOut(auth));
-  $("day-select").addEventListener("change", (event) => {
-    state.day = Number(event.target.value);
-    state.previousSession = null;
-    state.pulseSession = null;
-    subscribeToDay();
-    renderDashboard();
-  });
+  $("set-day-btn").addEventListener("click", setActiveDay);
   [$("in-hh"), $("in-mm"), $("in-ss")].forEach((input) => input.addEventListener("input", updateAnchorPreview));
   $("set-time-btn").addEventListener("click", () => setMissionTime());
   $("reset-time-btn").addEventListener("click", () => setMissionTime(true));
@@ -371,6 +401,7 @@ function enterApp() {
   $("crew-chip").textContent = state.profile.crewCode;
   $("crew-chip").classList.toggle("commander", state.profile.role === "commander");
   $("commander-panel").classList.toggle("hidden", state.profile.role !== "commander");
+  subscribeToActiveDay();
   subscribeToDay();
   renderDashboard();
 }
