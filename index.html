@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Mission Data Tracker — AATC</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#128752;</text></svg>">
+</head>
+<body>
+
+<div id="setup-banner" class="hidden">
+  <strong>Firebase is not configured.</strong>
+  Paste your project credentials into <code>firebase-config.js</code>, then reload.
+  Until then, login will not work.
+</div>
+
+<!-- ============================= LOGIN ============================= -->
+<section id="login-view">
+  <form class="login-card" id="login-form" autocomplete="on">
+    <h1>Mission Data Tracker</h1>
+    <p class="sub">AATC habitat &middot; SPACE READY_4</p>
+
+    <div class="field">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" autocomplete="username" required>
+    </div>
+
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+    </div>
+
+    <button type="submit" class="btn btn-primary" id="login-btn">Log in</button>
+    <p class="error" id="login-error" role="alert"></p>
+  </form>
+</section>
+
+<!-- ============================== APP ============================== -->
+<div id="app-view" class="hidden">
+
+  <header>
+    <div class="header-inner">
+      <div class="title">Daily Session Protocol</div>
+      <div class="who">
+        <span class="crew-chip" id="crew-chip">&mdash;</span>
+        <button class="btn" id="logout-btn" type="button">Log out</button>
+      </div>
+      <div class="clocks">
+        <span id="utc-clock">&mdash;</span>
+        <span id="mission-clock" class="unset">T+--:--:--</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- Commander only -->
+    <section class="card hidden" id="commander-panel">
+      <div class="panel-head">
+        <h2>Mission Control</h2>
+        <label class="hint" for="day-select">
+          Day
+          <select id="day-select">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="panel-body">
+        <div class="row">
+          <span class="row-label">Current UTC</span>
+          <span class="mono" id="cmd-utc">&mdash;</span>
+        </div>
+
+        <div class="row">
+          <span class="row-label">Current mission time</span>
+          <div class="time-inputs">
+            <span class="tplus">T+</span>
+            <input type="text" inputmode="numeric" id="in-hh" value="00" maxlength="2" aria-label="Hours">
+            <span class="sep">:</span>
+            <input type="text" inputmode="numeric" id="in-mm" value="00" maxlength="2" aria-label="Minutes">
+            <span class="sep">:</span>
+            <input type="text" inputmode="numeric" id="in-ss" value="00" maxlength="2" aria-label="Seconds">
+            <span class="units">HH MM SS</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <span class="row-label">Anchor UTC will be</span>
+          <span class="hint" id="anchor-preview">&mdash;</span>
+        </div>
+
+        <div class="row">
+          <button class="btn" id="set-time-btn" type="button">Set Mission Time</button>
+          <button class="btn" id="reset-time-btn" type="button">Reset to T+00:00:00</button>
+          <button class="btn btn-danger" id="reset-day-btn" type="button">Reset day &mdash; clear completions</button>
+        </div>
+
+        <div class="row">
+          <span class="row-label">Last saved</span>
+          <span class="hint" id="last-saved">&mdash;</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Day + session state -->
+    <section class="card">
+      <div class="day-strip">
+        <span class="day-label" id="day-label">Mission Day &mdash;</span>
+        <span class="dots" id="day-dots"></span>
+        <span class="hint" id="session-line">&mdash;</span>
+      </div>
+    </section>
+
+    <div class="tabs">
+      <button class="tab active" id="tab-sessions" type="button">Sessions</button>
+      <button class="tab" id="tab-dashboard" type="button">Crew dashboard</button>
+    </div>
+
+    <section id="sessions-view"></section>
+
+    <section id="dashboard-view" class="card hidden">
+      <div class="panel-head">
+        <h2 style="color:var(--teal)">Crew completion &mdash; Day <span id="dash-day">&mdash;</span></h2>
+        <span class="hint" id="dash-summary">&mdash;</span>
+      </div>
+      <div class="dash-scroll">
+        <table class="dash">
+          <thead>
+            <tr>
+              <th>Test</th>
+              <th>Done</th>
+              <th>Pending</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="dash-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script type="module" src="app.js?v=2"></script>
+</body>
+</html>
