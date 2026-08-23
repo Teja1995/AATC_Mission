@@ -213,14 +213,15 @@ header {
 #mission-clock {
   color: var(--teal);
   font-weight: 700;
-  font-size: 17px;
+  font-size: 28px;
   letter-spacing: .02em;
+  line-height: 1.15;
 }
 
 #mission-clock.unset {
   color: var(--muted);
   font-weight: 400;
-  font-size: 13px;
+  font-size: 22px;
 }
 
 /* ---------- Layout ---------- */
