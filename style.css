@@ -406,6 +406,32 @@ select#day-select {
 
 .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
 
+.session-nav {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.session-nav-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 9px 11px;
+  text-align: left;
+}
+
+.session-nav-item:hover { border-color: var(--muted); }
+.session-nav-item.selected { border-color: var(--teal); color: var(--text); }
+.session-nav-item.active { border-top: 2px solid var(--teal); }
+.session-nav-item small { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+
 .tab {
   background: transparent;
   border: 1px solid var(--line);
@@ -593,6 +619,7 @@ tr.sess-row.s4 td { color: var(--pink); }
 
 @media (max-width: 560px) {
   .mission-display-clock { font-size: 46px; }
+  .session-nav { grid-template-columns: repeat(2, 1fr); }
   .row-label { min-width: 100%; }
   .test { flex-wrap: wrap; }
   .test .sheet { order: 3; }

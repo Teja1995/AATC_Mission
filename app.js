@@ -82,6 +82,7 @@ const state = {
   dayUnsubscribers: [],
   previousSession: null,
   pulseSession: null,
+  selectedSession: null,
 };
 
 const configured = !Object.values(firebaseConfig).some((value) => value.startsWith("PASTE_"));
@@ -142,23 +143,36 @@ function renderDots() {
 function renderSessions() {
   if (!state.user) return;
   const current = activeSession(missionSeconds());
+  const selected = state.selectedSession === null ? (current ?? 0) : state.selectedSession;
   $("day-label").textContent = `Mission Day ${state.day}`;
   $("session-line").textContent = current === null ? "Mission day not started" : `Session ${current + 1} active`;
   renderDots();
 
-  $("sessions-view").innerHTML = SESSIONS.map((session, index) => {
-    const tests = visibleTests(session, state.day);
-    const status = current === null ? "upcoming" : index === current ? "active" : index < current ? "past" : "upcoming";
-    const windowEnd = session.end === 24 ? "T+24:00:00" : `T+${String(session.end).padStart(2, "0")}:00:00`;
-    return `<section class="session ${SESSION_ACCENTS[index]} ${status}">
-      <div class="session-head ${index === state.pulseSession ? "pulse" : ""}">
+  $("session-nav").innerHTML = SESSIONS.map((session, index) => {
+    const label = current === index ? "Active" : current !== null && index < current ? "Past" : "Upcoming";
+    return `<button class="session-nav-item ${index === selected ? "selected" : ""} ${index === current ? "active" : ""}" type="button" data-session-select="${index}">
+      <span>${session.name}</span><small>${label}</small>
+    </button>`;
+  }).join("");
+  document.querySelectorAll("[data-session-select]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedSession = Number(button.dataset.sessionSelect);
+      renderSessions();
+    });
+  });
+
+  const session = SESSIONS[selected];
+  const tests = visibleTests(session, state.day);
+  const status = current === null ? "upcoming" : selected === current ? "active" : selected < current ? "past" : "upcoming";
+  const windowEnd = session.end === 24 ? "T+24:00:00" : `T+${String(session.end).padStart(2, "0")}:00:00`;
+  $("sessions-view").innerHTML = `<section class="session ${SESSION_ACCENTS[selected]} ${status}">
+      <div class="session-head ${selected === state.pulseSession ? "pulse" : ""}">
         <span class="name">${session.name}</span>
         <span class="window">T+${String(session.start).padStart(2, "0")}:00:00 – ${windowEnd}</span>
-        <span class="badge ${index === current ? "now" : ""}">${index === current ? "Active" : status}</span>
+        <span class="badge ${selected === current ? "now" : ""}">${selected === current ? "Active" : status}</span>
       </div>
-      ${tests.length ? tests.map((test) => renderTest(test, index + 1)).join("") : "<div class=\"empty\">No tests scheduled.</div>"}
+      ${tests.length ? tests.map((test) => renderTest(test, selected + 1)).join("") : "<div class=\"empty\">No tests scheduled.</div>"}
     </section>`;
-  }).join("");
 
   document.querySelectorAll("[data-complete]").forEach((button) => {
     button.addEventListener("click", () => markDone(button.dataset.session, button.dataset.test));
@@ -307,6 +321,7 @@ function subscribeToActiveDay() {
     const activeDay = Number(snapshot.data().dayNumber);
     if (!Number.isInteger(activeDay) || activeDay < 1 || activeDay > 7 || activeDay === state.day) return;
     state.day = activeDay;
+    state.selectedSession = null;
     $("day-select").value = String(activeDay);
     state.previousSession = null;
     state.pulseSession = null;
@@ -324,6 +339,7 @@ async function setActiveDay() {
       updatedAt: new Date().toISOString(),
     });
     state.day = dayNumber;
+    state.selectedSession = null;
     state.previousSession = null;
     state.pulseSession = null;
     subscribeToDay();
