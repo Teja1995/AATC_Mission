@@ -232,6 +232,55 @@ main {
   padding: 18px 16px 64px;
 }
 
+.mission-display {
+  background: linear-gradient(135deg, #111b28 0%, #132c35 100%);
+  border: 1px solid #1f6d70;
+  border-radius: 10px;
+  margin-bottom: 18px;
+  padding: 28px 24px 24px;
+  text-align: center;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, .35);
+}
+
+.mission-display-label {
+  color: var(--teal);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+}
+
+.mission-display-clock {
+  color: var(--teal);
+  font-family: var(--mono);
+  font-size: 92px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  line-height: 1.05;
+  margin: 12px 0 16px;
+  text-shadow: 0 0 24px rgba(0, 229, 204, .24);
+}
+
+.mission-display-meta {
+  display: flex;
+  justify-content: center;
+  gap: 12px 28px;
+  flex-wrap: wrap;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.mission-display-detail {
+  border-top: 1px solid rgba(0, 229, 204, .2);
+  color: #b7c8d2;
+  font-size: 15px;
+  line-height: 1.6;
+  margin-top: 18px;
+  padding-top: 14px;
+}
+
 .card {
   background: var(--card);
   border: 1px solid var(--line);
@@ -543,6 +592,7 @@ tr.sess-row.s4 td { color: var(--pink); }
 #toast.err { border-color: var(--danger); color: #ffc9c9; }
 
 @media (max-width: 560px) {
+  .mission-display-clock { font-size: 46px; }
   .row-label { min-width: 100%; }
   .test { flex-wrap: wrap; }
   .test .sheet { order: 3; }

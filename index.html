@@ -56,6 +56,16 @@
 
   <main>
 
+    <section class="mission-display" aria-live="polite">
+      <div class="mission-display-label">Mission time</div>
+      <div class="mission-display-clock" id="display-mission-clock">T+--:--:--</div>
+      <div class="mission-display-meta">
+        <span id="display-day">Mission Day --</span>
+        <span id="display-session">Mission day not started</span>
+      </div>
+      <div class="mission-display-detail" id="display-session-detail">Waiting for Commander to start the mission day.</div>
+    </section>
+
     <!-- Commander only -->
     <section class="card hidden" id="commander-panel">
       <div class="panel-head">

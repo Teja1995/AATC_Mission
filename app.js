@@ -199,11 +199,17 @@ function renderDashboard() {
 
 function renderClocks() {
   const seconds = missionSeconds();
+  const current = activeSession(seconds);
   $("utc-clock").textContent = utcString();
   $("cmd-utc").textContent = utcString();
   $("mission-clock").textContent = formatMission(seconds);
   $("mission-clock").classList.toggle("unset", seconds === null);
-  const current = activeSession(seconds);
+  $("display-mission-clock").textContent = formatMission(seconds);
+  $("display-day").textContent = `Mission Day ${state.day}`;
+  $("display-session").textContent = current === null ? "Mission day not started" : `Session ${current + 1} active`;
+  $("display-session-detail").textContent = current === null
+    ? "Waiting for Commander to start the mission day."
+    : `${SESSIONS[current].name} · ${visibleTests(SESSIONS[current], state.day).map((test) => test[0]).join(" · ")}`;
   if (current !== null && current !== state.previousSession) {
     state.pulseSession = current;
     playSessionChime(current);
