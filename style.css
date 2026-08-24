@@ -229,7 +229,8 @@ header {
 main {
   max-width: 900px;
   margin: 0 auto;
-  padding: 18px 16px 64px;
+  /* Bottom padding clears the floating Log Void button. */
+  padding: 18px 16px 110px;
 }
 
 .mission-display {
@@ -623,4 +624,144 @@ tr.sess-row.s4 td { color: var(--pink); }
   .row-label { min-width: 100%; }
   .test { flex-wrap: wrap; }
   .test .sheet { order: 3; }
+}
+
+/* ---------- Log Void: floating button, modal, colour scale ---------- */
+
+.fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--teal);
+  border: none;
+  border-radius: 999px;
+  color: #05201d;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  padding: 14px 22px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .5);
+}
+
+.fab:hover { background: #2af0da; }
+
+.fab-icon { font-size: 20px; line-height: 1; font-weight: 700; }
+
+.fab-pending {
+  background: #05201d;
+  border-radius: 999px;
+  color: var(--teal);
+  font-size: 11px;
+  font-family: var(--mono);
+  padding: 2px 7px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 8, 12, .78);
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.modal {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .6);
+  max-width: 440px;
+  width: 100%;
+}
+
+.modal-head {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 14px 18px;
+}
+
+.modal-head h2 {
+  color: var(--teal);
+  font-size: 14px;
+  letter-spacing: .12em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.modal-body { padding: 18px; }
+
+.modal-auto {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 0 0 18px;
+  padding: 10px 12px;
+}
+
+.modal-foot { border-top: 1px solid var(--line); padding: 14px 18px; }
+
+#void-volume { font-family: var(--mono); font-size: 20px; }
+
+.colour-field { border: none; margin: 0; padding: 0; }
+
+.colour-field legend {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: .09em;
+  margin-bottom: 8px;
+  padding: 0;
+  text-transform: uppercase;
+}
+
+.swatches {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(8, 1fr);
+}
+
+.swatch {
+  aspect-ratio: 1 / 1.35;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  color: #2a1c02;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0;
+}
+
+.swatch:hover { border-color: var(--text); }
+
+.swatch.selected {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 2px rgba(0, 229, 204, .35);
+}
+
+.swatch-caption {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 8px 0 0;
+  min-height: 18px;
+}
+
+.swatch-caption.flag { color: var(--amber); font-weight: 600; }
+
+@media (max-width: 420px) {
+  .fab { padding: 12px 18px; font-size: 14px; }
+  .swatch { font-size: 12px; }
 }

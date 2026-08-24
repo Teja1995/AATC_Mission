@@ -443,3 +443,79 @@ seed().catch(err => { console.error(err); process.exit(1); });
 - Offline mode / service worker
 - Excel sheet integration
 - Any backend, API, or paid service
+
+## Urine Volume Logging
+
+### Overview
+Astronauts log urine volume via a 2-field form in the app. All other fields are
+auto-populated from the live mission clock and the logged-in user. Data is written
+to a private Google Sheet via a Google Apps Script web app. The sheet is visible
+only to FE01 and FE07.
+
+### What the astronaut sees
+A "Log Void" button accessible from any screen at any time. Tapping it opens:
+
+
+### What the app sends automatically (no astronaut input)
+- `crewCode` — from the logged-in user's Firestore document
+- `missionDay` — from `missionDay/{dayNumber}` in Firestore
+- `missionTime` — computed live: `T+HH:MM:SS`
+- `utcDateTime` — `new Date().toISOString()` at moment of submit
+
+### POST request
+On Submit, the app sends a POST to the Google Apps Script web app URL:
+
+```js
+fetch(APPS_SCRIPT_URL, {
+  method: 'POST',
+  body: JSON.stringify({
+    crewCode:    'FE07',
+    missionDay:  3,
+    missionTime: 'T+05:42:17',
+    utcDateTime: '2026-08-25T09:12:00.000Z',
+    volumeMl:    280,
+    colourScore: 3
+  })
+});
+```
+
+`APPS_SCRIPT_URL` is stored as a constant in `firebase-config.js`.
+
+### Google Apps Script
+Attached to the Google Sheet `AATC_UrineVolume`. Published as a web app
+(Execute as: Me, Access: Anyone).
+
+```js
+function doPost(e) {
+  const data = JSON.parse(e.postData.contents);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(data.crewCode);
+  if (!sheet) return ContentService.createTextOutput('Unknown crew code');
+  sheet.appendRow([
+    data.crewCode,
+    data.missionDay,
+    data.missionTime,
+    data.utcDateTime,
+    data.volumeMl,
+    data.colourScore
+  ]);
+  return ContentService.createTextOutput('OK');
+}
+```
+
+### Google Sheet structure
+File: `AATC_UrineVolume` (shared with FE01 and FE07 only)
+7 tabs: FE01, FE02, FE03, FE04, FE05, FE06, FE07
+
+Column headers on every tab:
+| A | B | C | D | E | F |
+|---|---|---|---|---|---|
+| Crew Code | Mission Day | Mission Time | UTC Date & Time | Volume (mL) | Colour (1–8) |
+
+### Colour reference (Armstrong scale — print and post near the toilet)
+| Score | Colour | Status |
+|---|---|---|
+| 1–2 | Pale straw | Well hydrated |
+| 3–4 | Yellow | Adequate |
+| 5–6 | Dark / amber | Mild dehydration |
+| 7–8 | Dark amber / brown | Flag to FE01 |

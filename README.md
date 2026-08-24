@@ -33,3 +33,41 @@ Also check that the account really is a commander: `users/{uid}.role` must read 
 ## Firestore reset note
 
 `firestore.rules` allows only commanders to delete completion documents, which is required by the in-app Reset day action. Astronauts can create only their own completion documents and cannot update or delete them.
+
+## Urine volume logging ("Log Void")
+
+A floating **Log Void** button sits on every screen once logged in. It asks for two
+things only — volume in millilitres, and the Armstrong colour, chosen by tapping one
+of eight swatches printed in the actual scale colours rather than typing a number.
+Crew code, mission day, mission time and UTC are filled in from the live session and
+shown above the form so the astronaut can see what is being recorded.
+
+Rows go to the `AATC_UrineVolume` Google Sheet through the Apps Script web app in
+[`apps-script/Code.gs`](apps-script/Code.gs):
+
+1. Open the sheet → Extensions → Apps Script, paste `Code.gs`, save.
+2. Run `setupSheets()` once to create the seven crew tabs with headers.
+3. Deploy → New deployment → Web app, *Execute as: Me*, *Who has access: Anyone*.
+4. Paste the `/exec` URL into `APPS_SCRIPT_URL` in `firebase-config.js`.
+5. Redeploy (not just save) after any later edit, or the URL serves the old code.
+
+### Nothing is lost if the network is
+
+A void cannot be measured twice, so an entry is written to the device before the
+network is touched and stays there until the sheet confirms it. The count of
+unsent entries rides on the Log Void button; queued entries retry every minute,
+when the browser comes back online, and on the next submit. If a response is lost
+after the row landed, the retry repeats it — `doPost` drops a row whose crew code
+and UTC timestamp match the row already at the bottom.
+
+If a browser ever refuses the cross-origin POST outright, entries stay queued and
+visible rather than vanishing. The fallback is `mode: "no-cors"` in `postEntry`,
+which delivers the row but makes confirmation impossible — only worth doing if the
+normal path proves unreliable in the habitat.
+
+### What the URL is worth
+
+`APPS_SCRIPT_URL` is not like the Firebase keys. It is a write capability: anyone
+who reads the page source can append rows to the sheet. It cannot read the sheet
+back, and the sheet stays shared with FE01 and FE07 only. That is the trade for
+having no backend; if junk rows ever appear, redeploy the script at a new URL.

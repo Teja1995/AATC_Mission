@@ -16,7 +16,23 @@ import {
   setDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=5";
+import { APPS_SCRIPT_URL, firebaseConfig } from "./firebase-config.js?v=6";
+
+// Armstrong urine colour scale. The swatches on screen carry these colours so
+// the crew matches a colour to a colour, not a colour to a number — the printed
+// chart by the toilet is the reference, this is the same chart on the tablet.
+const COLOUR_SCALE = [
+  { score: 1, hex: "#F8F3B0", ink: "#2a1c02", status: "Well hydrated" },
+  { score: 2, hex: "#F7EC85", ink: "#2a1c02", status: "Well hydrated" },
+  { score: 3, hex: "#F5E14F", ink: "#2a1c02", status: "Adequate" },
+  { score: 4, hex: "#F2D32A", ink: "#2a1c02", status: "Adequate" },
+  { score: 5, hex: "#E9BB16", ink: "#2a1c02", status: "Mild dehydration" },
+  { score: 6, hex: "#D99A0D", ink: "#2a1c02", status: "Mild dehydration" },
+  { score: 7, hex: "#C4700A", ink: "#fff4e2", status: "Flag to FE01" },
+  { score: 8, hex: "#9C4A08", ink: "#fff4e2", status: "Flag to FE01" },
+];
+
+const VOID_OUTBOX_KEY = "aatc-void-outbox";
 
 const CREW_CODES = ["FE01", "FE02", "FE03", "FE04", "FE05", "FE06", "FE07"];
 const SESSION_ACCENTS = ["s1", "s2", "s3", "s4"];
@@ -96,6 +112,7 @@ const state = {
   pulseSession: null,
   selectedSession: null,
   renderKey: "",
+  voidColour: null,          // Armstrong score selected in the Log Void form
 };
 
 const configured = !Object.values(firebaseConfig).some(
@@ -346,6 +363,7 @@ function paint(force = false) {
     }, 1300);
   }
   state.previousSession = current;
+  updateVoidAuto();
 
   const key = `${state.day}|${current}|${state.selectedSession}|${state.pulseSession}|${state.completionsVersion}`;
   if (force || key !== state.renderKey) {
@@ -555,6 +573,171 @@ function subscribeCompletions() {
   }, (error) => showToast(`Dashboard unavailable: ${describeError(error)}`, true));
 }
 
+/* ------------------------------------------------------------- log void -- */
+
+// A void cannot be measured twice. Every entry is written to the device before
+// the network is touched, and stays there until the sheet has taken it — so a
+// dead connection, a closed lid or a refresh mid-submit costs nothing.
+function readOutbox() {
+  try {
+    const raw = window.localStorage.getItem(VOID_OUTBOX_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function writeOutbox(entries) {
+  try {
+    window.localStorage.setItem(VOID_OUTBOX_KEY, JSON.stringify(entries));
+  } catch (error) {
+    showToast("This device cannot save the entry locally. Write it on paper.", true);
+  }
+  renderPending(entries.length);
+}
+
+function renderPending(count) {
+  const badge = $("void-pending");
+  badge.textContent = String(count);
+  badge.classList.toggle("hidden", count === 0);
+  badge.title = count === 1 ? "1 entry waiting to be sent" : `${count} entries waiting to be sent`;
+}
+
+async function postEntry(entry) {
+  // No custom headers on purpose. Anything beyond a simple request triggers a
+  // CORS preflight, and an Apps Script web app cannot answer OPTIONS — the
+  // POST would fail before it ever reached the sheet.
+  const response = await fetch(APPS_SCRIPT_URL, {
+    method: "POST",
+    body: JSON.stringify(entry.payload),
+    redirect: "follow",
+  });
+  const body = (await response.text()).trim();
+  if (!response.ok) throw new Error(`Sheet returned ${response.status}`);
+  if (/unknown crew code/i.test(body)) {
+    throw new Error(`The sheet has no tab named ${entry.payload.crewCode}. Entry kept on this device.`);
+  }
+  return body;
+}
+
+let flushing = false;
+
+async function flushOutbox({ announce = false } = {}) {
+  if (flushing) return;
+  let entries = readOutbox();
+  if (!entries.length) return;
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.startsWith("PASTE_")) {
+    if (announce) showToast("Sheet endpoint not configured — entry saved on this device.", true);
+    return;
+  }
+
+  flushing = true;
+  let sent = 0;
+  try {
+    while (entries.length) {
+      try {
+        await postEntry(entries[0]);
+      } catch (error) {
+        if (announce || sent) {
+          showToast(`${entries.length} void ${entries.length === 1 ? "entry is" : "entries are"} waiting to be sent: ${error.message}`, true);
+        }
+        break;
+      }
+      entries = entries.slice(1);
+      writeOutbox(entries);
+      sent += 1;
+    }
+  } finally {
+    flushing = false;
+  }
+
+  if (sent && announce) showToast(sent === 1 ? "Void logged to the sheet." : `${sent} void entries sent.`);
+  else if (sent) showToast(`${sent} queued void ${sent === 1 ? "entry" : "entries"} sent.`);
+}
+
+function renderSwatches() {
+  $("void-colours").innerHTML = COLOUR_SCALE.map((colour) =>
+    `<button class="swatch" type="button" data-colour="${colour.score}" style="background:${colour.hex};color:${colour.ink}"
+       aria-label="Colour ${colour.score} — ${colour.status}">${colour.score}</button>`,
+  ).join("");
+
+  document.querySelectorAll("[data-colour]").forEach((button) => {
+    button.addEventListener("click", () => selectColour(Number(button.dataset.colour)));
+  });
+}
+
+function selectColour(score) {
+  state.voidColour = score;
+  document.querySelectorAll("[data-colour]").forEach((button) => {
+    button.classList.toggle("selected", Number(button.dataset.colour) === score);
+  });
+  const colour = COLOUR_SCALE.find((item) => item.score === score);
+  const caption = $("void-colour-caption");
+  caption.textContent = `${score} — ${colour.status}`;
+  caption.classList.toggle("flag", score >= 7);
+}
+
+function updateVoidAuto() {
+  if ($("void-modal").classList.contains("hidden")) return;
+  const clock = resolveClock();
+  $("void-auto").textContent = [
+    state.profile?.crewCode ?? "—",
+    `Mission Day ${state.day}`,
+    formatMission(clock.seconds),
+    utcString(),
+  ].join("   ·   ");
+}
+
+function openVoidModal() {
+  if (!state.profile) return;
+  state.voidColour = null;
+  $("void-form").reset();
+  $("void-error").textContent = "";
+  $("void-colour-caption").textContent = "Match the chart posted by the toilet.";
+  $("void-colour-caption").classList.remove("flag");
+  document.querySelectorAll("[data-colour]").forEach((button) => button.classList.remove("selected"));
+  $("void-modal").classList.remove("hidden");
+  updateVoidAuto();
+  $("void-volume").focus();
+}
+
+function closeVoidModal() {
+  $("void-modal").classList.add("hidden");
+}
+
+async function submitVoid(event) {
+  event.preventDefault();
+  const volumeMl = Number($("void-volume").value);
+  if (!Number.isFinite(volumeMl) || volumeMl <= 0) {
+    $("void-error").textContent = "Enter the volume in millilitres.";
+    return;
+  }
+  if (state.voidColour === null) {
+    $("void-error").textContent = "Select the colour that matches the chart.";
+    return;
+  }
+
+  const clock = resolveClock();
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    payload: {
+      crewCode: state.profile.crewCode,
+      missionDay: state.day,
+      // Empty rather than a fake reading when no day has been anchored yet.
+      // utcDateTime is always exact, so mission time stays reconstructable.
+      missionTime: clock.seconds === null ? "" : formatMission(clock.seconds),
+      utcDateTime: new Date().toISOString(),
+      volumeMl,
+      colourScore: state.voidColour,
+    },
+  };
+
+  writeOutbox([...readOutbox(), entry]);
+  closeVoidModal();
+  await flushOutbox({ announce: true });
+}
+
 /* ------------------------------------------------------------------- ui -- */
 
 function configureUi() {
@@ -583,6 +766,24 @@ function configureUi() {
   $("reset-day-btn").addEventListener("click", resetDay);
   $("tab-sessions").addEventListener("click", () => switchTab("sessions"));
   $("tab-dashboard").addEventListener("click", () => switchTab("dashboard"));
+
+  renderSwatches();
+  renderPending(readOutbox().length);
+  $("log-void-btn").addEventListener("click", openVoidModal);
+  $("void-close").addEventListener("click", closeVoidModal);
+  $("void-form").addEventListener("submit", submitVoid);
+  $("void-modal").addEventListener("mousedown", (event) => {
+    if (event.target === $("void-modal")) closeVoidModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeVoidModal();
+  });
+
+  // Anything still queued goes out as soon as there is a network again.
+  window.addEventListener("online", () => flushOutbox());
+  window.setInterval(() => flushOutbox(), 60000);
+  flushOutbox();
+
   updateAnchorPreview();
 }
 

@@ -16,3 +16,12 @@ export const firebaseConfig = {
   appId: "1:202616289745:web:a8a9783a71c5091481c8f0",
   measurementId: "G-DDG08W3H37",
 };
+
+// Google Apps Script web app that appends void logs to the AATC_UrineVolume
+// sheet. Deploy the script in apps-script/Code.gs as a web app (Execute as: Me,
+// Access: Anyone) and paste the /exec URL here.
+//
+// Unlike the Firebase keys above, this URL is a write capability: anyone who
+// reads the page source can append rows to the sheet. It cannot read the sheet
+// back. That is the cost of having no backend — see README.
+export const APPS_SCRIPT_URL = "PASTE_APPS_SCRIPT_URL";
