@@ -17,7 +17,7 @@ import {
   setDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=9";
+import { firebaseConfig } from "./firebase-config.js?v=10";
 
 // Armstrong urine colour scale. The swatches on screen carry these colours so
 // the crew matches a colour to a colour, not a colour to a number — the printed
@@ -29,8 +29,8 @@ const COLOUR_SCALE = [
   { score: 4, hex: "#F2D32A", ink: "#2a1c02", status: "Adequate" },
   { score: 5, hex: "#E9BB16", ink: "#2a1c02", status: "Mild dehydration" },
   { score: 6, hex: "#D99A0D", ink: "#2a1c02", status: "Mild dehydration" },
-  { score: 7, hex: "#C4700A", ink: "#fff4e2", status: "Flag to FE01" },
-  { score: 8, hex: "#9C4A08", ink: "#fff4e2", status: "Flag to FE01" },
+  { score: 7, hex: "#C4700A", ink: "#fff4e2", status: "Dehydrated" },
+  { score: 8, hex: "#9C4A08", ink: "#fff4e2", status: "Dehydrated" },
 ];
 
 const VOID_OUTBOX_KEY = "aatc-void-outbox";
@@ -927,7 +927,6 @@ function selectColour(score) {
   const colour = COLOUR_SCALE.find((item) => item.score === score);
   const caption = $("void-colour-caption");
   caption.textContent = `${score} — ${colour.status}`;
-  caption.classList.toggle("flag", score >= 7);
 }
 
 function updateVoidAuto() {
@@ -947,7 +946,6 @@ function openVoidModal() {
   $("void-form").reset();
   $("void-error").textContent = "";
   $("void-colour-caption").textContent = "Match the chart posted by the toilet.";
-  $("void-colour-caption").classList.remove("flag");
   document.querySelectorAll("[data-colour]").forEach((button) => button.classList.remove("selected"));
   $("void-modal").classList.remove("hidden");
   updateVoidAuto();

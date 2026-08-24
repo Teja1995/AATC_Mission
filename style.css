@@ -759,7 +759,6 @@ tr.sess-row.s4 td { color: var(--pink); }
   min-height: 18px;
 }
 
-.swatch-caption.flag { color: var(--amber); font-weight: 600; }
 
 @media (max-width: 420px) {
   .fab { padding: 12px 18px; font-size: 14px; }

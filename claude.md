@@ -358,12 +358,15 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function isCommander() {
-      return isCrew() && profile().role == 'commander';
+    // FE04 commands the mission; FE07 administers the application and has the
+    // same authority over it. Everyone else is crew, FE01 included.
+    function canCommand() {
+      return isCrew() && profile().role in ['commander', 'admin'];
     }
 
-    function isDataOfficer() {
-      return isCrew() && profile().crewCode in ['FE01', 'FE07'];
+    // The void log is read back by the admin alone.
+    function isAdmin() {
+      return isCrew() && profile().role == 'admin';
     }
 
     // A document filed by one crew member must not be able to claim another's
@@ -375,7 +378,7 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if isCrew() && (request.auth.uid == uid || isCommander());
+      allow read: if isCrew() && (request.auth.uid == uid || canCommand());
       allow write: if false; // managed by the seed script only
     }
 
@@ -383,7 +386,7 @@ service cloud.firestore {
     // active day under the reserved id "active".
     match /missionDay/{day} {
       allow read: if isCrew();
-      allow write: if isCommander();
+      allow write: if canCommand();
     }
 
     // Tasks the commander adds to a session. Every crew member reads them --
@@ -391,12 +394,12 @@ service cloud.firestore {
     // writes. Titles are free text, so they stay inside the crew.
     match /tasks/{taskId} {
       allow read: if isCrew();
-      allow write: if isCommander();
+      allow write: if canCommand();
     }
 
     // Void logs are health data. A crew member files their own and can read
-    // their own back; only the two data officers can read the whole set, which
-    // is what the CSV export needs. Nothing is ever updated or deleted -- a
+    // their own back; only the admin reads the whole set, which is what the
+    // CSV export needs. Nothing is ever updated or deleted -- a
     // measurement that has been taken is a fact.
     match /voids/{voidId} {
       allow create: if filedBySelf();
@@ -404,9 +407,9 @@ service cloud.firestore {
       // resource.data can only be satisfied by a query the engine can prove
       // matches it; the export lists the whole collection, so its rule must
       // stand on the caller alone.
-      allow get: if isDataOfficer()
+      allow get: if isAdmin()
         || (isCrew() && resource.data.uid == request.auth.uid);
-      allow list: if isDataOfficer();
+      allow list: if isAdmin();
       allow update, delete: if false;
     }
 
@@ -414,7 +417,7 @@ service cloud.firestore {
       allow read: if isCrew();
       allow create: if filedBySelf();
       allow update: if false; // no undoing from the app
-      allow delete: if isCommander(); // the Reset day action
+      allow delete: if canCommand(); // the Reset day action
     }
   }
 }
@@ -577,8 +580,7 @@ opens a form with exactly two inputs:
 - **Volume (mL)** -- a number.
 - **Colour (1-8)** -- eight swatches painted in the Armstrong scale's own
   colours, so the crew matches a colour to a colour rather than translating one
-  into a number. The selected score shows its status text, and 7-8 reads
-  "Flag to FE01".
+  into a number. The selected score shows its status text.
 
 ### What the app records automatically (no astronaut input)
 - `crewCode` -- from the logged-in user's Firestore document
@@ -633,4 +635,4 @@ app -- a measurement that has been taken is a fact.
 | 1-2 | Pale straw | Well hydrated |
 | 3-4 | Yellow | Adequate |
 | 5-6 | Dark / amber | Mild dehydration |
-| 7-8 | Dark amber / brown | Flag to FE01 |
+| 7-8 | Dark amber / brown | Dehydrated |
