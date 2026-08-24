@@ -629,9 +629,7 @@ tr.sess-row.s4 td { color: var(--pink); }
 /* ---------- Log Void: floating button, modal, colour scale ---------- */
 
 .fab {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
+  position: static;
   z-index: 40;
   display: flex;
   align-items: center;
@@ -906,3 +904,130 @@ tr.sess-row.s4 td { color: var(--pink); }
 .mylog-row .crew-chip { flex: 0 0 auto; }
 
 #allvoids-body { margin-top: 4px; max-height: 420px; overflow-y: auto; }
+
+/* ---------- The + button and its menu ---------- */
+
+.fab-stack {
+  align-items: flex-end;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: fixed;
+  right: 20px;
+  z-index: 40;
+}
+
+.fab-round {
+  align-items: center;
+  border-radius: 50%;
+  display: flex;
+  height: 62px;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+  width: 62px;
+}
+
+.fab-plus {
+  font-size: 34px;
+  font-weight: 300;
+  line-height: 1;
+  transition: transform .18s ease;
+}
+
+.fab-round.open .fab-plus { transform: rotate(45deg); }
+
+.fab-pending-total {
+  position: absolute;
+  right: -2px;
+  top: -2px;
+  background: var(--danger);
+  color: #2a0b0b;
+  font-weight: 700;
+}
+
+.fab-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fab-option {
+  align-items: center;
+  background: var(--card-raised);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .5);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  font-size: 15px;
+  font-weight: 600;
+  gap: 10px;
+  padding: 12px 20px;
+}
+
+.fab-option:hover { border-color: var(--teal); color: var(--teal); }
+
+.fab-option-icon { font-size: 17px; line-height: 1; }
+
+.fab-option .fab-pending {
+  background: var(--danger);
+  color: #2a0b0b;
+  font-weight: 700;
+}
+
+/* ---------- Food form ---------- */
+
+.barcode-row { display: flex; gap: 8px; }
+
+.barcode-row input {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  flex: 1 1 auto;
+  font-family: var(--mono);
+  font-size: 17px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.barcode-row input:focus { outline: none; border-color: var(--teal); }
+
+#food-kcal100, #food-grams, #food-total {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: var(--mono);
+  padding: 10px 12px;
+  width: 100%;
+}
+
+#food-total { font-size: 20px; font-weight: 700; color: var(--teal); }
+
+.scanner {
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  padding: 8px;
+  text-align: center;
+}
+
+.scanner video {
+  border-radius: 6px;
+  display: block;
+  margin-bottom: 8px;
+  max-height: 260px;
+  width: 100%;
+}
+
+.meal-name { flex: 1 1 auto; min-width: 0; }
+
+.meal-name small { color: var(--muted); }
+
+.barcode-tag { margin-left: 8px; opacity: .65; }
+
+#allmeals-body { margin-top: 4px; max-height: 420px; overflow-y: auto; }

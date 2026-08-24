@@ -105,6 +105,30 @@ service cloud.firestore {
         || (isCrew() && !isDisplay() && resource.data.uid == request.auth.uid);
     }
 
+    // Food logs sit under the same rules as urine logs: your own to file, see,
+    // correct and remove; the admin holds the whole set for the export. Energy
+    // is a criterion measure here, not a diary -- what one crew member eats is
+    // not the rest of the crew's business.
+    match /meals/{mealId} {
+      allow create: if filedBySelf();
+      allow get: if isAdmin()
+        || (isCrew() && resource.data.uid == request.auth.uid);
+      allow list: if isAdmin()
+        || (isCrew() && resource.data.uid == request.auth.uid);
+      // Only the amount eaten and what it was can be corrected. Who logged it
+      // and when are pinned to what was written at the time.
+      allow update: if isCrew()
+        && !isDisplay()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.crewCode == resource.data.crewCode
+        && request.resource.data.utcDateTime == resource.data.utcDateTime
+        && request.resource.data.missionDay == resource.data.missionDay
+        && request.resource.data.missionTime == resource.data.missionTime;
+      allow delete: if isAdmin()
+        || (isCrew() && !isDisplay() && resource.data.uid == request.auth.uid);
+    }
+
     match /completions/{docId} {
       allow read: if isCrew();
       allow create: if filedBySelf();

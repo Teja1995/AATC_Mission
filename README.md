@@ -184,3 +184,33 @@ Leave incognito off, or the sign-in is lost at every reboot.
 and the item model. Both `app.js` and `display.js` import it, so the screen on
 the wall cannot disagree with the phone in someone's hand about what is due or
 what day it is. Run its checks with `node tests/mission.test.mjs`.
+
+## Food logging
+
+The floating **+** button opens a menu — **Log Urine**, **Log Food** — with room
+for whatever gets added next. A count of unsent entries rides on the + itself,
+since the menu is shut most of the time.
+
+**Log Food** takes a barcode, then how much was eaten:
+
+- **Scan** uses the browser's own `BarcodeDetector`. It exists in Chrome and on
+  Android; **Safari has no such API**, so the barcode field is always typeable
+  and the Look up button works either way. A USB barcode gun works too — those
+  type the digits and press Enter, which the field handles.
+- The barcode is looked up in **Open Food Facts** (free, no key, permissive
+  CORS), filling in the product name and kcal per 100 g.
+- Enter the grams eaten and the **total kcal** is computed. That total is the
+  measure; it stays editable, and every field the lookup filled can be
+  overwritten.
+- **A barcode is never required.** An analog habitat repacks most of its food,
+  so naming the food and typing the kcal is a first-class path, recorded as
+  `source: "manual"` rather than `"barcode"`.
+
+**My food log** is a tab beside My urine log: your own entries, newest first,
+with the day's running kcal total in the header. Edit corrects an entry; Delete
+removes it. Same rules as urine — your own to see, correct and remove; the admin
+holds the whole set, can delete anyone's, and exports it as
+`aatc_food_log_<date>.csv`.
+
+Entries queue on the device before they touch the network, exactly like urine
+entries, and flush when the connection returns.

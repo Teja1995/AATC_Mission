@@ -18,7 +18,7 @@ import {
   updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=14";
+import { firebaseConfig } from "./firebase-config.js?v=15";
 import {
   ACTIVE_DAY_DOC,
   ASSIGN_ALL,
@@ -37,7 +37,7 @@ import {
   sessionItems as sessionItemsFor,
   utcString,
   visibleTests,
-} from "./mission.js?v=14";
+} from "./mission.js?v=15";
 
 // Armstrong urine colour scale. The swatches on screen carry these colours so
 // the crew matches a colour to a colour, not a colour to a number — the printed
@@ -54,6 +54,13 @@ const COLOUR_SCALE = [
 ];
 
 const VOID_OUTBOX_KEY = "aatc-void-outbox";
+const FOOD_OUTBOX_KEY = "aatc-food-outbox";
+
+// Open Food Facts: free, no key, and it answers with a permissive CORS header,
+// so the browser can ask it directly. Coverage is good for branded goods and
+// thin for anything repackaged, which is why every field it fills stays
+// editable and a log with no barcode at all is a first-class case.
+const OFF_ENDPOINT = "https://world.openfoodfacts.org/api/v2/product/";
 
 // Three roles. The commander runs the mission day; the admin runs the
 // application and holds the urine log as well. Everyone else is crew.
@@ -87,6 +94,13 @@ const state = {
   myVoidsUnsubscribe: null,
   allVoids: new Map(),       // every entry, admin only
   allVoidsUnsubscribe: null,
+  myMeals: new Map(),
+  myMealsUnsubscribe: null,
+  allMeals: new Map(),
+  allMealsUnsubscribe: null,
+  editingMealId: null,
+  scanStream: null,          // live camera track while scanning a barcode
+  scanTimer: null,
   editingVoidId: null,       // set while correcting an existing entry
 };
 
@@ -336,6 +350,7 @@ function paint(force = false) {
   }
   state.previousSession = current;
   updateVoidAuto();
+  updateFoodAuto();
 
   const key = `${state.day}|${current}|${state.selectedSession}|${state.pulseSession}|${state.completionsVersion}`;
   if (force || key !== state.renderKey) {
@@ -511,8 +526,18 @@ function clearSubscriptions() {
     state.allVoidsUnsubscribe();
     state.allVoidsUnsubscribe = null;
   }
+  if (state.myMealsUnsubscribe) {
+    state.myMealsUnsubscribe();
+    state.myMealsUnsubscribe = null;
+  }
+  if (state.allMealsUnsubscribe) {
+    state.allMealsUnsubscribe();
+    state.allMealsUnsubscribe = null;
+  }
   state.myVoids = new Map();
   state.allVoids = new Map();
+  state.myMeals = new Map();
+  state.allMeals = new Map();
   state.dayDataDay = null;
   state.anchors = new Map();
   state.completions = new Map();
@@ -774,9 +799,30 @@ function renderAllVoids() {
 // A void cannot be measured twice. Every entry is written to the device before
 // the network is touched, and stays there until the sheet has taken it — so a
 // dead connection, a closed lid or a refresh mid-submit costs nothing.
-function readOutbox() {
+// Two logs, one queue mechanism. A measurement reaches the device before it
+// reaches the network and stays there until Firestore confirms it, so a dead
+// connection, a closed lid or a refresh mid-submit costs nothing either way.
+const OUTBOXES = {
+  urine: {
+    key: VOID_OUTBOX_KEY,
+    badge: "void-pending",
+    collection: "voids",
+    noun: "urine",
+    fields: ["uid", "crewCode", "missionDay", "missionTime", "utcDateTime", "volumeMl", "colourScore"],
+  },
+  food: {
+    key: FOOD_OUTBOX_KEY,
+    badge: "food-pending",
+    collection: "meals",
+    noun: "food",
+    fields: ["uid", "crewCode", "missionDay", "missionTime", "utcDateTime",
+             "barcode", "productName", "kcalPer100g", "grams", "totalKcal", "source"],
+  },
+};
+
+function readOutbox(box) {
   try {
-    const raw = window.localStorage.getItem(VOID_OUTBOX_KEY);
+    const raw = window.localStorage.getItem(box.key);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
@@ -784,46 +830,56 @@ function readOutbox() {
   }
 }
 
-function writeOutbox(entries) {
+function writeOutbox(box, entries) {
   try {
-    window.localStorage.setItem(VOID_OUTBOX_KEY, JSON.stringify(entries));
+    window.localStorage.setItem(box.key, JSON.stringify(entries));
   } catch (error) {
     showToast("This device cannot save the entry locally. Write it on paper.", true);
   }
-  renderPending(entries.length);
+  renderPending(box, entries.length);
 }
 
-function renderPending(count) {
-  const badge = $("void-pending");
+function renderPending(box, count) {
+  const badge = $(box.badge);
   badge.textContent = String(count);
   badge.classList.toggle("hidden", count === 0);
   badge.title = count === 1 ? "1 entry waiting to be sent" : `${count} entries waiting to be sent`;
+
+  // The menu is closed most of the time, so the count has to be visible on the
+  // button itself or a stuck entry goes unnoticed.
+  const total = Object.values(OUTBOXES)
+    .reduce((sum, other) => sum + readOutbox(other).length, 0);
+  const totalBadge = $("pending-total");
+  totalBadge.textContent = String(total);
+  totalBadge.classList.toggle("hidden", total === 0);
 }
 
-// The document id is the crew code and the moment of the void, so a retry after
-// a lost response writes the same document again instead of a second row. There
-// is no such thing as a duplicated void.
-function voidDocId(payload) {
+function toggleFabMenu(open) {
+  const menu = $("fab-menu");
+  const next = open === undefined ? menu.classList.contains("hidden") : open;
+  menu.classList.toggle("hidden", !next);
+  $("fab-toggle").classList.toggle("open", next);
+  $("fab-toggle").setAttribute("aria-expanded", String(next));
+}
+
+// The document id is the crew code and the moment the entry was made, so a
+// retry after a lost response rewrites the same document instead of adding a
+// second row. Neither a void nor a meal can be duplicated by a retry.
+function entryDocId(payload) {
   return `${payload.crewCode}_${payload.utcDateTime.replace(/[:.]/g, "-")}`;
 }
 
-async function postEntry(entry) {
-  await setDoc(doc(db, "voids", voidDocId(entry.payload)), {
-    uid: entry.payload.uid,
-    crewCode: entry.payload.crewCode,
-    missionDay: entry.payload.missionDay,
-    missionTime: entry.payload.missionTime,
-    utcDateTime: entry.payload.utcDateTime,
-    volumeMl: entry.payload.volumeMl,
-    colourScore: entry.payload.colourScore,
-  });
+async function postEntry(box, entry) {
+  const document = {};
+  box.fields.forEach((field) => { document[field] = entry.payload[field] ?? null; });
+  await setDoc(doc(db, box.collection, entryDocId(entry.payload)), document);
 }
 
 let flushing = false;
 
-async function flushOutbox({ announce = false } = {}) {
+async function flushOutbox(box, { announce = false } = {}) {
   if (flushing) return;
-  let entries = readOutbox();
+  let entries = readOutbox(box);
   if (!entries.length) return;
   if (!db || !state.user) return;
 
@@ -832,23 +888,28 @@ async function flushOutbox({ announce = false } = {}) {
   try {
     while (entries.length) {
       try {
-        await postEntry(entries[0]);
+        await postEntry(box, entries[0]);
       } catch (error) {
         if (announce || sent) {
-          showToast(`${entries.length} urine ${entries.length === 1 ? "entry is" : "entries are"} waiting to be sent: ${error.message}`, true);
+          showToast(`${entries.length} ${box.noun} ${entries.length === 1 ? "entry is" : "entries are"} waiting to be sent: ${describeError(error)}`, true);
         }
         break;
       }
       entries = entries.slice(1);
-      writeOutbox(entries);
+      writeOutbox(box, entries);
       sent += 1;
     }
   } finally {
     flushing = false;
   }
 
-  if (sent && announce) showToast(sent === 1 ? "Urine entry logged." : `${sent} urine entries logged.`);
-  else if (sent) showToast(`${sent} queued urine ${sent === 1 ? "entry" : "entries"} sent.`);
+  if (sent && announce) showToast(sent === 1 ? `${box.noun === "urine" ? "Urine" : "Food"} entry logged.` : `${sent} entries logged.`);
+  else if (sent) showToast(`${sent} queued ${box.noun} ${sent === 1 ? "entry" : "entries"} sent.`);
+}
+
+function flushAll(options) {
+  flushOutbox(OUTBOXES.urine, options);
+  flushOutbox(OUTBOXES.food, options);
 }
 
 // The columns the protocol asks for, in that order.
@@ -861,6 +922,19 @@ const VOID_CSV_COLUMNS = [
   ["colourScore", "Colour (1-8)"],
   ["correctedAt", "Corrected (UTC)"],
 ];
+
+// A BOM so Excel opens the file as UTF-8 rather than mangling it.
+function downloadCsv(csv, filename) {
+  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 
 function csvCell(value) {
   const text = value === undefined || value === null ? "" : String(value);
@@ -886,16 +960,7 @@ async function exportVoidsCsv() {
       .concat(rows.map((row) => VOID_CSV_COLUMNS.map(([field]) => csvCell(row[field])).join(",")))
       .join("\r\n");
 
-    // A BOM so Excel opens it as UTF-8 rather than mangling it.
-    const blob = new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `aatc_urine_log_${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    downloadCsv(csv, `aatc_urine_log_${new Date().toISOString().slice(0, 10)}.csv`);
 
     showToast(`Exported ${rows.length} ${rows.length === 1 ? "entry" : "entries"}.`);
   } catch (error) {
@@ -1027,9 +1092,372 @@ async function submitVoid(event) {
     },
   };
 
-  writeOutbox([...readOutbox(), entry]);
+  writeOutbox(OUTBOXES.urine, [...readOutbox(OUTBOXES.urine), entry]);
   closeVoidModal();
-  await flushOutbox({ announce: true });
+  await flushOutbox(OUTBOXES.urine, { announce: true });
+}
+
+
+/* ------------------------------------------------------------- log food -- */
+
+function foodField(id) { return $(id).value.trim(); }
+
+// Total energy is the measure; the amount and the per-100 g figure are only a
+// way of arriving at it. Whenever both are known the total is filled in, and it
+// stays editable because a repackaged habitat portion often has neither.
+function recomputeFoodTotal() {
+  const per100 = Number($("food-kcal100").value);
+  const grams = Number($("food-grams").value);
+  if (!Number.isFinite(per100) || !Number.isFinite(grams) || per100 <= 0 || grams <= 0) return;
+  $("food-total").value = Math.round(per100 * grams / 100);
+}
+
+async function lookupBarcode(code) {
+  const barcode = String(code || foodField("food-barcode")).replace(/\D/g, "");
+  if (!barcode) {
+    $("food-error").textContent = "Type or scan a barcode first.";
+    return;
+  }
+
+  $("food-barcode").value = barcode;
+  $("food-error").textContent = "";
+  $("food-scan-hint").textContent = "Looking up...";
+
+  try {
+    const url = `${OFF_ENDPOINT}${encodeURIComponent(barcode)}.json`
+      + "?fields=product_name,brands,nutriments,quantity";
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`lookup returned ${response.status}`);
+    const data = await response.json();
+
+    if (data.status !== 1 || !data.product) {
+      // Not an error: an analog habitat repacks most of its food. Fill the rest
+      // in by hand and the entry counts the same.
+      $("food-scan-hint").textContent = "Not in the food database. Type the name and the energy yourself.";
+      $("food-name").focus();
+      return;
+    }
+
+    const product = data.product;
+    const name = [product.product_name, product.brands].filter(Boolean).join(" - ");
+    const per100 = Number(product.nutriments?.["energy-kcal_100g"]);
+
+    $("food-name").value = name || `Barcode ${barcode}`;
+    if (Number.isFinite(per100) && per100 > 0) {
+      $("food-kcal100").value = per100;
+      $("food-scan-hint").textContent = `${name} · ${per100} kcal per 100 g. Enter how much was eaten.`;
+      $("food-grams").focus();
+    } else {
+      $("food-scan-hint").textContent = `${name} - the database has no kcal figure. Type the energy yourself.`;
+      $("food-total").focus();
+    }
+    recomputeFoodTotal();
+  } catch (error) {
+    $("food-scan-hint").textContent = "Could not reach the food database. Type the name and energy yourself.";
+  }
+}
+
+// Camera scanning uses the browser's own BarcodeDetector where it exists
+// (Chrome, and Android in particular). Safari has no such API, so the barcode
+// field is always typeable and nothing here depends on the camera.
+async function startScan() {
+  if (!("BarcodeDetector" in window)) {
+    $("food-scan-hint").textContent =
+      "This browser cannot scan. Type the barcode digits and press Look up.";
+    $("food-barcode").focus();
+    return;
+  }
+
+  try {
+    const detector = new window.BarcodeDetector({
+      formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"],
+    });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+    });
+    state.scanStream = stream;
+
+    const video = $("food-video");
+    video.srcObject = stream;
+    await video.play();
+    $("food-scanner").classList.remove("hidden");
+    $("food-scan-hint").textContent = "Point the camera at the barcode.";
+
+    state.scanTimer = window.setInterval(async () => {
+      try {
+        const found = await detector.detect(video);
+        if (!found.length) return;
+        const code = found[0].rawValue;
+        stopScan();
+        await lookupBarcode(code);
+      } catch (error) {
+        // A frame that cannot be decoded is normal; keep looking.
+      }
+    }, 350);
+  } catch (error) {
+    stopScan();
+    $("food-scan-hint").textContent =
+      "No camera available. Type the barcode digits and press Look up.";
+  }
+}
+
+function stopScan() {
+  if (state.scanTimer) {
+    window.clearInterval(state.scanTimer);
+    state.scanTimer = null;
+  }
+  if (state.scanStream) {
+    state.scanStream.getTracks().forEach((track) => track.stop());
+    state.scanStream = null;
+  }
+  const video = $("food-video");
+  if (video) video.srcObject = null;
+  $("food-scanner").classList.add("hidden");
+}
+
+function updateFoodAuto() {
+  if ($("food-modal").classList.contains("hidden")) return;
+  const existing = state.editingMealId ? state.myMeals.get(state.editingMealId) : null;
+  if (existing) {
+    $("food-auto").textContent = [
+      existing.crewCode,
+      `Mission Day ${existing.missionDay}`,
+      existing.missionTime || "T+--:--:--",
+      `${String(existing.utcDateTime).replace("T", "  ").slice(0, 19)} UTC`,
+    ].join("   ·   ");
+    return;
+  }
+  const clock = resolveClock();
+  $("food-auto").textContent = [
+    state.profile?.crewCode ?? "-",
+    `Mission Day ${state.day}`,
+    formatMission(clock.seconds),
+    utcString(),
+  ].join("   ·   ");
+}
+
+function openFoodModal(editId = null) {
+  if (!state.profile) return;
+  const existing = editId ? state.myMeals.get(editId) : null;
+
+  state.editingMealId = existing ? editId : null;
+  $("food-form").reset();
+  $("food-error").textContent = "";
+  $("food-scan-hint").textContent = "";
+  $("food-title").textContent = existing ? "Correct entry" : "Log Food";
+  $("food-submit").textContent = existing ? "Save correction" : "Submit";
+
+  if (existing) {
+    $("food-barcode").value = existing.barcode || "";
+    $("food-name").value = existing.productName || "";
+    $("food-kcal100").value = existing.kcalPer100g ?? "";
+    $("food-grams").value = existing.grams ?? "";
+    $("food-total").value = existing.totalKcal ?? "";
+  }
+
+  $("food-modal").classList.remove("hidden");
+  updateFoodAuto();
+  (existing ? $("food-grams") : $("food-barcode")).focus();
+}
+
+function closeFoodModal() {
+  stopScan();
+  $("food-modal").classList.add("hidden");
+  state.editingMealId = null;
+}
+
+async function submitFood(event) {
+  event.preventDefault();
+  const productName = foodField("food-name");
+  const totalKcal = Number($("food-total").value);
+
+  if (!productName) {
+    $("food-error").textContent = "Name the food.";
+    return;
+  }
+  if (!Number.isFinite(totalKcal) || totalKcal <= 0) {
+    $("food-error").textContent = "Enter the total energy in kcal.";
+    return;
+  }
+
+  const numberOrNull = (id) => {
+    const value = Number($(id).value);
+    return $(id).value.trim() === "" || !Number.isFinite(value) ? null : value;
+  };
+  const barcode = foodField("food-barcode").replace(/\D/g, "");
+
+  if (state.editingMealId) {
+    try {
+      await updateDoc(doc(db, "meals", state.editingMealId), {
+        barcode: barcode || null,
+        productName,
+        kcalPer100g: numberOrNull("food-kcal100"),
+        grams: numberOrNull("food-grams"),
+        totalKcal,
+        correctedAt: new Date().toISOString(),
+      });
+      closeFoodModal();
+      showToast("Entry corrected.");
+    } catch (error) {
+      $("food-error").textContent = describeError(error);
+    }
+    return;
+  }
+
+  const clock = resolveClock();
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    payload: {
+      uid: state.user.uid,
+      crewCode: state.profile.crewCode,
+      missionDay: state.day,
+      missionTime: clock.seconds === null ? "" : formatMission(clock.seconds),
+      utcDateTime: new Date().toISOString(),
+      barcode: barcode || null,
+      productName,
+      kcalPer100g: numberOrNull("food-kcal100"),
+      grams: numberOrNull("food-grams"),
+      totalKcal,
+      source: barcode ? "barcode" : "manual",
+    },
+  };
+
+  writeOutbox(OUTBOXES.food, [...readOutbox(OUTBOXES.food), entry]);
+  closeFoodModal();
+  await flushOutbox(OUTBOXES.food, { announce: true });
+}
+
+async function deleteMeal(id, entry) {
+  const what = `${entry.crewCode} · Day ${entry.missionDay} · ${entry.productName} · ${entry.totalKcal} kcal`;
+  if (!window.confirm(`Delete this entry permanently?\n\n${what}\n\nThis cannot be undone.`)) return;
+  try {
+    await deleteDoc(doc(db, "meals", id));
+    showToast("Entry deleted.");
+  } catch (error) {
+    showToast(`Could not delete: ${describeError(error)}`, true);
+  }
+}
+
+function mealRow(id, entry, { showCrew = false, canEdit = false } = {}) {
+  const amount = entry.grams ? `${entry.grams} g` : "";
+  return `<div class="mylog-row">
+    ${showCrew ? `<span class="crew-chip">${escapeHtml(String(entry.crewCode))}</span>` : ""}
+    <span class="mylog-when">
+      <strong>Day ${entry.missionDay}</strong>
+      <span class="mono">${entry.missionTime || "T+--:--:--"}</span>
+      <small class="mono">${String(entry.utcDateTime).replace("T", " ").slice(0, 19)} UTC</small>
+    </span>
+    <span class="meal-name">${escapeHtml(entry.productName)}${
+      amount ? `<small class="mono"> · ${amount}</small>` : ""}${
+      entry.barcode ? `<small class="mono barcode-tag">${escapeHtml(String(entry.barcode))}</small>` : ""}</span>
+    <span class="mylog-volume mono">${entry.totalKcal} kcal</span>
+    ${entry.correctedAt ? '<span class="corrected">corrected</span>' : ""}
+    ${canEdit ? `<button class="btn btn-small" type="button" data-edit-meal="${id}">Edit</button>` : ""}
+    <button class="btn btn-small btn-danger" type="button" data-delete-meal="${id}">Delete</button>
+  </div>`;
+}
+
+function mealRowActions(container, source) {
+  container.querySelectorAll("[data-edit-meal]").forEach((button) => {
+    button.addEventListener("click", () => openFoodModal(button.dataset.editMeal));
+  });
+  container.querySelectorAll("[data-delete-meal]").forEach((button) => {
+    const id = button.dataset.deleteMeal;
+    button.addEventListener("click", () => deleteMeal(id, source.get(id)));
+  });
+}
+
+function subscribeMyMeals() {
+  if (!db || !state.user) return;
+  if (state.myMealsUnsubscribe) state.myMealsUnsubscribe();
+  const mine = query(collection(db, "meals"), where("uid", "==", state.user.uid));
+  state.myMealsUnsubscribe = onSnapshot(mine, (snapshot) => {
+    state.myMeals = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
+    renderFoodLog();
+  }, (error) => showToast(`Your food log is unavailable: ${describeError(error)}`, true));
+}
+
+function subscribeAllMeals() {
+  if (!db || !isAdmin()) return;
+  if (state.allMealsUnsubscribe) state.allMealsUnsubscribe();
+  state.allMealsUnsubscribe = onSnapshot(collection(db, "meals"), (snapshot) => {
+    state.allMeals = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
+    renderAllMeals();
+  }, (error) => showToast(`Food log unavailable: ${describeError(error)}`, true));
+}
+
+function renderFoodLog() {
+  const entries = [...state.myMeals.entries()]
+    .sort((a, b) => String(b[1].utcDateTime).localeCompare(String(a[1].utcDateTime)));
+
+  const today = entries.filter(([, entry]) => Number(entry.missionDay) === state.day);
+  const todayKcal = today.reduce((sum, [, entry]) => sum + Number(entry.totalKcal || 0), 0);
+
+  $("foodlog-summary").textContent = entries.length
+    ? `${todayKcal} kcal today · ${entries.length} ${entries.length === 1 ? "entry" : "entries"} in all`
+    : "";
+
+  $("foodlog-body").innerHTML = entries.length
+    ? entries.map(([id, entry]) => mealRow(id, entry, { canEdit: true })).join("")
+    : '<p class="empty">Nothing logged yet. Use the Log Food button.</p>';
+
+  mealRowActions($("foodlog-body"), state.myMeals);
+}
+
+function renderAllMeals() {
+  const entries = [...state.allMeals.entries()]
+    .sort((a, b) => String(b[1].utcDateTime).localeCompare(String(a[1].utcDateTime)));
+
+  $("allmeals-summary").textContent = entries.length
+    ? `${entries.length} ${entries.length === 1 ? "entry" : "entries"}, newest first`
+    : "nothing logged yet";
+
+  $("allmeals-body").innerHTML = entries
+    .map(([id, entry]) => mealRow(id, entry, { showCrew: true })).join("");
+
+  mealRowActions($("allmeals-body"), state.allMeals);
+}
+
+const MEAL_CSV_COLUMNS = [
+  ["crewCode", "Crew Code"],
+  ["missionDay", "Mission Day"],
+  ["missionTime", "Mission Time"],
+  ["utcDateTime", "UTC Date & Time"],
+  ["productName", "Food"],
+  ["barcode", "Barcode"],
+  ["kcalPer100g", "kcal per 100 g"],
+  ["grams", "Amount (g)"],
+  ["totalKcal", "Total (kcal)"],
+  ["source", "Source"],
+  ["correctedAt", "Corrected (UTC)"],
+];
+
+async function exportMealsCsv() {
+  const button = $("export-meals-btn");
+  button.disabled = true;
+  try {
+    const snapshot = await getDocs(collection(db, "meals"));
+    const rows = snapshot.docs
+      .map((item) => item.data())
+      .sort((a, b) => String(a.crewCode).localeCompare(String(b.crewCode))
+        || String(a.utcDateTime).localeCompare(String(b.utcDateTime)));
+
+    if (!rows.length) {
+      showToast("No food entries logged yet.", true);
+      return;
+    }
+
+    const csv = [MEAL_CSV_COLUMNS.map(([, header]) => header).join(",")]
+      .concat(rows.map((row) => MEAL_CSV_COLUMNS.map(([field]) => csvCell(row[field])).join(",")))
+      .join("\r\n");
+
+    downloadCsv(csv, `aatc_food_log_${new Date().toISOString().slice(0, 10)}.csv`);
+    showToast(`Exported ${rows.length} ${rows.length === 1 ? "entry" : "entries"}.`);
+  } catch (error) {
+    showToast(`Could not export: ${describeError(error)}`, true);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 /* ------------------------------------------------------------------- ui -- */
@@ -1061,6 +1489,7 @@ function configureUi() {
   $("tab-sessions").addEventListener("click", () => switchTab("sessions"));
   $("tab-dashboard").addEventListener("click", () => switchTab("dashboard"));
   $("tab-mylog").addEventListener("click", () => switchTab("mylog"));
+  $("tab-foodlog").addEventListener("click", () => switchTab("foodlog"));
 
   $("task-assignee").innerHTML = `<option value="${ASSIGN_ALL}">Everyone</option>`
     + CREW_CODES.map((code) => `<option value="${code}">${code}</option>`).join("");
@@ -1068,21 +1497,46 @@ function configureUi() {
   $("export-voids-btn").addEventListener("click", exportVoidsCsv);
 
   renderSwatches();
-  renderPending(readOutbox().length);
-  $("log-void-btn").addEventListener("click", openVoidModal);
+  renderPending(OUTBOXES.urine, readOutbox(OUTBOXES.urine).length);
+  renderPending(OUTBOXES.food, readOutbox(OUTBOXES.food).length);
+  $("fab-toggle").addEventListener("click", () => toggleFabMenu());
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".fab-stack")) toggleFabMenu(false);
+  });
+  $("log-void-btn").addEventListener("click", () => { toggleFabMenu(false); openVoidModal(); });
+  $("log-food-btn").addEventListener("click", () => { toggleFabMenu(false); openFoodModal(); });
+
+  $("food-form").addEventListener("submit", submitFood);
+  $("food-close").addEventListener("click", closeFoodModal);
+  $("food-scan-btn").addEventListener("click", startScan);
+  $("food-scan-stop").addEventListener("click", stopScan);
+  $("food-lookup-btn").addEventListener("click", () => lookupBarcode());
+  $("food-barcode").addEventListener("keydown", (event) => {
+    // Hardware scanners type the digits and press Enter.
+    if (event.key === "Enter") { event.preventDefault(); lookupBarcode(); }
+  });
+  [$("food-kcal100"), $("food-grams")].forEach((input) =>
+    input.addEventListener("input", recomputeFoodTotal));
+  $("food-modal").addEventListener("mousedown", (event) => {
+    if (event.target === $("food-modal")) closeFoodModal();
+  });
+  $("export-meals-btn").addEventListener("click", exportMealsCsv);
   $("void-close").addEventListener("click", closeVoidModal);
   $("void-form").addEventListener("submit", submitVoid);
   $("void-modal").addEventListener("mousedown", (event) => {
     if (event.target === $("void-modal")) closeVoidModal();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeVoidModal();
+    if (event.key !== "Escape") return;
+    closeVoidModal();
+    closeFoodModal();
+    toggleFabMenu(false);
   });
 
   // Anything still queued goes out as soon as there is a network again.
-  window.addEventListener("online", () => flushOutbox());
-  window.setInterval(() => flushOutbox(), 60000);
-  flushOutbox();
+  window.addEventListener("online", () => flushAll());
+  window.setInterval(() => flushAll(), 60000);
+  flushAll();
 
   updateAnchorPreview();
 }
@@ -1092,9 +1546,11 @@ function switchTab(tab) {
   $("sessions-view").classList.toggle("hidden", tab !== "sessions");
   $("dashboard-view").classList.toggle("hidden", tab !== "dashboard");
   $("mylog-view").classList.toggle("hidden", tab !== "mylog");
+  $("foodlog-view").classList.toggle("hidden", tab !== "foodlog");
   $("tab-sessions").classList.toggle("active", tab === "sessions");
   $("tab-dashboard").classList.toggle("active", tab === "dashboard");
   $("tab-mylog").classList.toggle("active", tab === "mylog");
+  $("tab-foodlog").classList.toggle("active", tab === "foodlog");
 }
 
 function enterApp() {
@@ -1111,6 +1567,8 @@ function enterApp() {
   subscribeDayData();
   subscribeMyVoids();
   subscribeAllVoids();
+  subscribeMyMeals();
+  subscribeAllMeals();
   paint(true);
 }
 

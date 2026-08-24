@@ -573,6 +573,40 @@ about what is due or what day it is. `tests/mission.test.mjs` checks that module
 directly: the 24-hour rollover, the day-conditional tests, and how added tasks
 merge into a session.
 
+## Food logging
+
+Energy intake alongside the hydration measures. The floating **+** opens a menu
+of log types -- Log Urine, Log Food -- rather than one button per kind, so the
+next thing to log is another row instead of another button on the screen.
+
+The form takes a barcode and how much was eaten. Scanning uses the browser's own
+`BarcodeDetector`, which Chrome and Android have and Safari does not, so the
+barcode field is always typeable and the camera is never load-bearing. The code
+is looked up in Open Food Facts, which is free, needs no key and answers with a
+permissive CORS header. It fills in the product name and kcal per 100 g; grams
+eaten gives the total.
+
+**Total kcal is the measure.** Everything else is a way of arriving at it, and
+all of it stays editable. A barcode is never required: an analog habitat repacks
+most of its food, so a hand-typed name and energy is a first-class entry,
+recorded as `source: "manual"`.
+
+```
+/meals/{crewCode}_{utcDateTime}
+  uid, crewCode, missionDay, missionTime, utcDateTime
+  barcode: string | null
+  productName: string
+  kcalPer100g: number | null
+  grams: number | null
+  totalKcal: number
+  source: "barcode" | "manual"
+  correctedAt: string | null
+```
+
+Same rules as the urine log: your own to file, see, correct and remove; the
+admin reads and exports the whole set and can delete anyone's. Same device queue
+too -- an entry reaches the phone before it reaches the network.
+
 ## Out of scope (do not build)
 
 - Self-registration
