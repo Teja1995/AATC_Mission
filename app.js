@@ -18,7 +18,7 @@ import {
   updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=16";
+import { firebaseConfig } from "./firebase-config.js?v=17";
 import {
   ACTIVE_DAY_DOC,
   ASSIGN_ALL,
@@ -37,7 +37,7 @@ import {
   sessionItems as sessionItemsFor,
   utcString,
   visibleTests,
-} from "./mission.js?v=16";
+} from "./mission.js?v=17";
 
 // Armstrong urine colour scale. The swatches on screen carry these colours so
 // the crew matches a colour to a colour, not a colour to a number — the printed
@@ -99,6 +99,8 @@ const state = {
   allMeals: new Map(),
   allMealsUnsubscribe: null,
   editingMealId: null,
+  foodItems: new Map(),      // the crew's own food list, shared
+  foodItemsUnsubscribe: null,
   scanStream: null,          // live camera track while scanning a barcode
   scanTimer: null,
   editingVoidId: null,       // set while correcting an existing entry
@@ -536,8 +538,13 @@ function clearSubscriptions() {
   }
   state.myVoids = new Map();
   state.allVoids = new Map();
+  if (state.foodItemsUnsubscribe) {
+    state.foodItemsUnsubscribe();
+    state.foodItemsUnsubscribe = null;
+  }
   state.myMeals = new Map();
   state.allMeals = new Map();
+  state.foodItems = new Map();
   state.dayDataDay = null;
   state.anchors = new Map();
   state.completions = new Map();
@@ -1162,12 +1169,12 @@ async function lookupCatalogue(barcode) {
 }
 
 async function rememberFood(barcode, productName, kcalPer100g) {
-  if (!barcode || !productName) return;
+  if (!productName || !kcalPer100g) return;
   try {
-    await setDoc(doc(db, "foodItems", barcode), {
-      barcode,
+    await setDoc(doc(db, "foodItems", foodItemId(barcode, productName)), {
+      barcode: barcode || null,
       productName,
-      kcalPer100g: kcalPer100g ?? null,
+      kcalPer100g,
       addedBy: state.profile.crewCode,
       addedAt: new Date().toISOString(),
     }, { merge: true });
@@ -1339,6 +1346,7 @@ function openFoodModal(editId = null) {
   $("food-form").reset();
   $("food-error").textContent = "";
   $("food-scan-hint").textContent = "";
+  $("food-known-hint").textContent = "";
   $("food-title").textContent = existing ? "Correct entry" : "Log Food";
   $("food-submit").textContent = existing ? "Save correction" : "Submit";
 
@@ -1556,6 +1564,145 @@ async function exportMealsCsv() {
   }
 }
 
+
+/* ------------------------------------------------- the crew's food list -- */
+
+// Open Food Facts holds almost nothing for Polish shelf products -- nine real
+// barcodes tried, none found -- and nothing at all for repacked rations. There
+// is no better public database to point at, so the crew keeps its own: entered
+// once, by one person, and filled in for everyone after that.
+function foodItemId(barcode, productName) {
+  if (barcode) return barcode;
+  return `n_${productName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 80)}`;
+}
+
+function subscribeFoodItems() {
+  if (!db || !state.user) return;
+  if (state.foodItemsUnsubscribe) state.foodItemsUnsubscribe();
+  state.foodItemsUnsubscribe = onSnapshot(collection(db, "foodItems"), (snapshot) => {
+    state.foodItems = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
+    renderFoodDatalist();
+    renderFoodItems();
+  }, (error) => showToast(`Food list unavailable: ${describeError(error)}`, true));
+}
+
+function renderFoodDatalist() {
+  const names = [...state.foodItems.values()]
+    .map((item) => item.productName)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  $("food-known-list").innerHTML = names
+    .map((name) => `<option value="${escapeAttr(name)}"></option>`).join("");
+}
+
+function findFoodItemByName(name) {
+  const wanted = String(name).trim().toLowerCase();
+  if (!wanted) return null;
+  for (const item of state.foodItems.values()) {
+    if (String(item.productName).trim().toLowerCase() === wanted) return item;
+  }
+  return null;
+}
+
+// Choosing from the list is the fast path: no barcode, no internet, no typing
+// a number off a packet that may not even be the one in your hand.
+function applyKnownFood() {
+  const item = findFoodItemByName($("food-known").value);
+  if (!item) {
+    $("food-known-hint").textContent = "";
+    return;
+  }
+  $("food-name").value = item.productName;
+  if (item.kcalPer100g) $("food-kcal100").value = item.kcalPer100g;
+  if (item.barcode) $("food-barcode").value = item.barcode;
+  $("food-known-hint").textContent = item.kcalPer100g
+    ? `${item.kcalPer100g} kcal per 100 g. Enter how much was eaten.`
+    : "No energy figure on the list yet - type it.";
+  recomputeFoodTotal();
+  $("food-grams").focus();
+}
+
+function renderFoodItems() {
+  if (!isAdmin()) return;
+  const items = [...state.foodItems.entries()]
+    .sort((a, b) => String(a[1].productName).localeCompare(String(b[1].productName)));
+
+  $("fooditems-summary").textContent = items.length
+    ? `${items.length} ${items.length === 1 ? "food" : "foods"} known`
+    : "empty - nothing will fill itself in yet";
+
+  $("fooditems-body").innerHTML = items.map(([id, item]) => `<div class="mylog-row">
+      <span class="meal-name">${escapeHtml(String(item.productName))}${
+        item.barcode ? `<small class="mono barcode-tag">${escapeHtml(String(item.barcode))}</small>` : ""}</span>
+      <span class="mylog-volume mono">${item.kcalPer100g ?? "?"} kcal/100g</span>
+      <small class="hint">${escapeHtml(String(item.addedBy ?? ""))}</small>
+      <button class="btn btn-small btn-danger" type="button" data-delete-fooditem="${id}">Delete</button>
+    </div>`).join("");
+
+  $("fooditems-body").querySelectorAll("[data-delete-fooditem]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.deleteFooditem;
+      const item = state.foodItems.get(id);
+      if (!window.confirm(`Remove "${item.productName}" from the crew food list?\n\nEntries already logged are untouched.`)) return;
+      try {
+        await deleteDoc(doc(db, "foodItems", id));
+        showToast("Removed from the food list.");
+      } catch (error) {
+        showToast(`Could not remove: ${describeError(error)}`, true);
+      }
+    });
+  });
+}
+
+// Pasted as "barcode,name,kcal" a line, because the Data Officer will be
+// copying off packets in bulk, not adding them one at a time.
+async function addFoodItems() {
+  const lines = $("fooditems-paste").value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) return;
+
+  const parsed = [];
+  const rejected = [];
+  lines.forEach((line) => {
+    const parts = line.split(",").map((part) => part.trim());
+    const barcode = (parts[0] || "").replace(/\D/g, "");
+    const productName = parts[1] || "";
+    const kcal = Number(parts[2]);
+    if (!productName || !Number.isFinite(kcal) || kcal <= 0) {
+      rejected.push(line);
+      return;
+    }
+    parsed.push({ barcode, productName, kcalPer100g: kcal });
+  });
+
+  if (!parsed.length) {
+    showToast("Nothing usable. Each line needs: barcode,name,kcal", true);
+    return;
+  }
+
+  $("fooditems-add-btn").disabled = true;
+  let added = 0;
+  try {
+    for (const item of parsed) {
+      await setDoc(doc(db, "foodItems", foodItemId(item.barcode, item.productName)), {
+        barcode: item.barcode || null,
+        productName: item.productName,
+        kcalPer100g: item.kcalPer100g,
+        addedBy: state.profile.crewCode,
+        addedAt: new Date().toISOString(),
+      }, { merge: true });
+      added += 1;
+    }
+    $("fooditems-paste").value = rejected.join("\n");
+    showToast(rejected.length
+      ? `Added ${added}. ${rejected.length} line(s) left in the box - each needs barcode,name,kcal.`
+      : `Added ${added} to the crew food list.`);
+  } catch (error) {
+    showToast(`Stopped after ${added}: ${describeError(error)}`, true);
+  } finally {
+    $("fooditems-add-btn").disabled = false;
+  }
+}
+
 /* ------------------------------------------------------------------- ui -- */
 
 function configureUi() {
@@ -1617,6 +1764,9 @@ function configureUi() {
     if (event.target === $("food-modal")) closeFoodModal();
   });
   $("export-meals-btn").addEventListener("click", exportMealsCsv);
+  $("fooditems-add-btn").addEventListener("click", addFoodItems);
+  $("food-known").addEventListener("input", applyKnownFood);
+  $("food-known").addEventListener("change", applyKnownFood);
   $("void-close").addEventListener("click", closeVoidModal);
   $("void-form").addEventListener("submit", submitVoid);
   $("void-modal").addEventListener("mousedown", (event) => {
@@ -1665,6 +1815,7 @@ function enterApp() {
   subscribeAllVoids();
   subscribeMyMeals();
   subscribeAllMeals();
+  subscribeFoodItems();
   paint(true);
 }
 

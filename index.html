@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Mission Data Tracker — AATC</title>
-<link rel="stylesheet" href="style.css?v=16">
+<link rel="stylesheet" href="style.css?v=17">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#128752;</text></svg>">
 </head>
 <body>
@@ -179,7 +179,21 @@
         </div>
         <div id="allvoids-body"></div>
 
-        <div class="row" style="margin-top:20px">
+        <div class="row" style="margin-top:24px">
+          <span class="row-label">Crew food list</span>
+          <span class="hint" id="fooditems-summary">&mdash;</span>
+        </div>
+        <div class="row">
+          <textarea id="fooditems-paste" rows="4"
+                    placeholder="One food per line:  barcode,name,kcal per 100 g&#10;Leave the barcode empty for anything unpackaged:  ,Chleb zytni,247"></textarea>
+        </div>
+        <div class="row">
+          <button class="btn" id="fooditems-add-btn" type="button">Add to the crew list</button>
+          <span class="hint">Entered once here, it fills itself in for everyone afterwards.</span>
+        </div>
+        <div id="fooditems-body"></div>
+
+        <div class="row" style="margin-top:24px">
           <button class="btn" id="export-meals-btn" type="button">Download food log (CSV)</button>
           <span class="hint">Energy intake per entry, with the barcode where there was one.</span>
         </div>
@@ -283,6 +297,14 @@
         <p class="modal-auto mono" id="food-auto">&mdash;</p>
 
         <div class="field">
+          <label for="food-known">Known food</label>
+          <input type="text" id="food-known" list="food-known-list" autocomplete="off"
+                 placeholder="Start typing - the crew list fills the rest in">
+          <datalist id="food-known-list"></datalist>
+          <p class="hint" id="food-known-hint"></p>
+        </div>
+
+        <div class="field">
           <label for="food-barcode">Barcode</label>
           <div class="barcode-row">
             <input type="text" id="food-barcode" inputmode="numeric" autocomplete="off"
@@ -364,6 +386,6 @@
   </div>
 </div>
 
-<script type="module" src="app.js?v=16"></script>
+<script type="module" src="app.js?v=17"></script>
 </body>
 </html>

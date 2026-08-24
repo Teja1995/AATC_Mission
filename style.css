@@ -1031,3 +1031,30 @@ tr.sess-row.s4 td { color: var(--pink); }
 .barcode-tag { margin-left: 8px; opacity: .65; }
 
 #allmeals-body { margin-top: 4px; max-height: 420px; overflow-y: auto; }
+
+/* ---------- Crew food list ---------- */
+
+#food-known {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+#food-known:focus { outline: none; border-color: var(--teal); }
+
+#fooditems-paste {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 10px 12px;
+  resize: vertical;
+  width: 100%;
+}
+
+#fooditems-paste:focus { outline: none; border-color: var(--amber); }
+
+#fooditems-body { margin-top: 4px; max-height: 320px; overflow-y: auto; }

@@ -586,12 +586,17 @@ is looked up in Open Food Facts, which is free, needs no key and answers with a
 permissive CORS header. It fills in the product name and kcal per 100 g; grams
 eaten gives the total.
 
-Lookups consult the **crew's own list** (`/foodItems/{barcode}`) before the
-internet. Open Food Facts is thin on Polish shelf products -- three of five real
-Polish barcodes tested were absent -- and knows nothing about repacked habitat
-rations, so the first person to name a barcode teaches it to everyone and no
-one types it twice. An unknown barcode returns HTTP 404 from that API, which is
-the ordinary case here and must not be reported as a network failure.
+Lookups consult the **crew's own list** (`/foodItems`) before the internet, and
+the form opens with a *Known food* picker that autocompletes against it -- for
+most of this mission's food that is the whole interaction, with no barcode and
+no network at all. The admin can paste the list in bulk as
+`barcode,name,kcal` lines, taken off the packets once; anything logged by hand
+afterwards joins the list automatically. There is no Polish barcode database worth linking to: `pl.openfoodfacts.org` is
+the same dataset as `world.`, nine real Polish barcodes tested returned nothing,
+GS1 Poland publishes no API, and the commercial services need a key that would
+be public in this page. An unknown barcode returns HTTP 404 from Open Food
+Facts, which is the ordinary case here and must never be reported as a network
+failure.
 
 **Total kcal is the measure.** Everything else is a way of arriving at it, and
 all of it stays editable. A barcode is never required: an analog habitat repacks

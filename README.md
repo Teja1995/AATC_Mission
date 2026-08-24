@@ -210,16 +210,31 @@ since the menu is shut most of the time.
 
 ### The crew's own food list
 
-Open Food Facts is thin on Polish shelf products — of five real Polish barcodes
-tested, three were not in it at all — and it knows nothing about repacked
-habitat rations. So whenever a barcode is logged with a name and an energy
-figure, that pairing is saved to `/foodItems/{barcode}`, shared by the whole
-crew. The next person to scan the same packet gets it filled in instantly,
-credited to whoever added it, with no internet involved.
+There is no Polish barcode database worth linking to. Checked:
 
-The list is consulted **before** the internet, so a product the crew has already
-identified resolves immediately even if Open Food Facts is slow or unreachable.
-Anyone can improve an entry; the display account cannot write to it.
+| Source | Result |
+|---|---|
+| `pl.openfoodfacts.org` | The same database as `world.` — identical 404s |
+| Polish barcodes sampled in Open Food Facts | **0 of 6** found, plus 3 of 5 missing in an earlier sample |
+| GS1 Poland eProdukty | No public API |
+| Nutritionix / Edamam and similar | Need an API key, which would sit in this page's public source, and are weak on Polish retail |
+
+So the app keeps its own list in `/foodItems`, and the point is that **each food
+is typed once by one person**, not by every crew member every time:
+
+- **FE07 prepares it up front.** The Urine log panel has a *Crew food list* box
+  that takes lines of `barcode,name,kcal per 100 g` pasted in bulk, straight off
+  the packets. Leave the barcode empty for anything unpackaged:
+  `,Chleb żytni,247`.
+- **Crew pick from it.** The food form starts with a *Known food* box that
+  autocompletes against that list and fills in the energy — no barcode, no
+  camera, no internet.
+- **Anything logged by hand joins the list.** Log a food with a name and an
+  energy figure and it is saved for everyone, credited to whoever added it.
+
+The list is consulted **before** Open Food Facts, so anything the crew has
+already identified resolves instantly even when that service is slow or
+unreachable. The display account cannot write to it.
 
 **My food log** is a tab beside My urine log: your own entries, newest first,
 with the day's running kcal total in the header. Edit corrects an entry; Delete
