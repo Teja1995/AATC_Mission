@@ -25,12 +25,11 @@ Only the Commander can set the mission day start time.
 | Role | How identified | Privileges |
 |---|---|---|
 | Commander | `users/{uid}.role == "commander"` | Set the mission day and its anchor; add and remove session tasks; reset a day |
-| Admin | `users/{uid}.role == "admin"` | Everything the Commander can do, plus reading and exporting the void log |
+| Admin | `users/{uid}.role == "admin"` | Everything the Commander can do |
 | Astronaut | `users/{uid}.role == "astronaut"` | Mark own tests as done; view dashboard |
 
-FE04 is the Commanding Officer. FE07 administers the application and is the only
-account that can read the void log back. Every other crew member, FE01 included,
-is an astronaut with no additional privileges.
+FE04 is the Commanding Officer. FE07 administers the application. Every other
+crew member, FE01 included, is an astronaut with no additional privileges.
 
 There is no self-registration — accounts are created by running the seed script (see below)
 before Day 1. Each crew member receives their email + temporary password from the Data Officer.
@@ -364,15 +363,19 @@ service cloud.firestore {
       return isCrew() && profile().role in ['commander', 'admin'];
     }
 
-    // The void log is read back by the admin alone.
-    function isAdmin() {
-      return isCrew() && profile().role == 'admin';
+    // The wall display signs in as its own account and hangs unattended in a
+    // shared space. It reads the mission day, the battery and the dashboard,
+    // and it can write nothing at all -- nobody walking past a screen can mark
+    // a test done or file a measurement.
+    function isDisplay() {
+      return isCrew() && profile().role == 'display';
     }
 
     // A document filed by one crew member must not be able to claim another's
     // crew code -- that is what the dashboard and the exported CSV read.
     function filedBySelf() {
       return isCrew()
+        && !isDisplay()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.crewCode == profile().crewCode;
     }
@@ -395,22 +398,6 @@ service cloud.firestore {
     match /tasks/{taskId} {
       allow read: if isCrew();
       allow write: if canCommand();
-    }
-
-    // Void logs are health data. A crew member files their own and can read
-    // their own back; only the admin reads the whole set, which is what the
-    // CSV export needs. Nothing is ever updated or deleted -- a
-    // measurement that has been taken is a fact.
-    match /voids/{voidId} {
-      allow create: if filedBySelf();
-      // get and list are split deliberately. A list rule that inspects
-      // resource.data can only be satisfied by a query the engine can prove
-      // matches it; the export lists the whole collection, so its rule must
-      // stand on the caller alone.
-      allow get: if isAdmin()
-        || (isCrew() && resource.data.uid == request.auth.uid);
-      allow list: if isAdmin();
-      allow update, delete: if false;
     }
 
     match /completions/{docId} {
@@ -555,69 +542,23 @@ the rules stop a crew member writing a completion under anyone else's uid.
 `display.html` is a second page for a Raspberry Pi driving a screen in the
 habitat. It shows the mission clock, the mission day, the session due now, what
 is next, and the crew dashboard -- and nothing else. No Mission Control, no
-added-task controls, no urine log, no Log Urine button.
+added-task controls.
 
 It signs in as a dedicated account whose `users/{uid}` document carries
 `role: "display"` and `crewCode: "DISPLAY"`. The rules give that role read
 access to `missionDay`, `tasks` and `completions`, and refuse it every write:
-`filedBySelf()` and the urine-log update rule both exclude it. A screen left
-unattended in a shared space cannot mark a test done or file a measurement, and
-`DISPLAY` never appears on the dashboard as somebody who owes anything.
+`filedBySelf()` excludes it. A screen left unattended in a shared space cannot
+mark a test done, and `DISPLAY` never appears on the dashboard as somebody who
+owes anything.
 
-The Pi must never be signed in as a crew member -- that would put one person's
-private urine log and every admin control on a wall.
+The Pi must never be signed in as a crew member -- that would put every admin
+control on a wall.
 
 `mission.js` holds the battery, the session windows, the clock arithmetic and
 the item model, and both pages import it. The display cannot drift from the app
 about what is due or what day it is. `tests/mission.test.mjs` checks that module
 directly: the 24-hour rollover, the day-conditional tests, and how added tasks
 merge into a session.
-
-## Food logging
-
-Energy intake alongside the hydration measures. The floating **+** opens a menu
-of log types -- Log Urine, Log Food -- rather than one button per kind, so the
-next thing to log is another row instead of another button on the screen.
-
-The form takes a barcode and how much was eaten. Scanning uses the browser's own
-`BarcodeDetector`, which Chrome and Android have and Safari does not, so the
-barcode field is always typeable and the camera is never load-bearing. The code
-is looked up in Open Food Facts, which is free, needs no key and answers with a
-permissive CORS header. It fills in the product name and kcal per 100 g; grams
-eaten gives the total.
-
-Lookups consult the **crew's own list** (`/foodItems`) before the internet, and
-the form opens with a *Known food* picker that autocompletes against it -- for
-most of this mission's food that is the whole interaction, with no barcode and
-no network at all. The admin can paste the list in bulk as
-`barcode,name,kcal` lines, taken off the packets once; anything logged by hand
-afterwards joins the list automatically. There is no Polish barcode database worth linking to: `pl.openfoodfacts.org` is
-the same dataset as `world.`, nine real Polish barcodes tested returned nothing,
-GS1 Poland publishes no API, and the commercial services need a key that would
-be public in this page. An unknown barcode returns HTTP 404 from Open Food
-Facts, which is the ordinary case here and must never be reported as a network
-failure.
-
-**Total kcal is the measure.** Everything else is a way of arriving at it, and
-all of it stays editable. A barcode is never required: an analog habitat repacks
-most of its food, so a hand-typed name and energy is a first-class entry,
-recorded as `source: "manual"`.
-
-```
-/meals/{crewCode}_{utcDateTime}
-  uid, crewCode, missionDay, missionTime, utcDateTime
-  barcode: string | null
-  productName: string
-  kcalPer100g: number | null
-  grams: number | null
-  totalKcal: number
-  source: "barcode" | "manual"
-  correctedAt: string | null
-```
-
-Same rules as the urine log: your own to file, see, correct and remove; the
-admin reads and exports the whole set and can delete anyone's. Same device queue
-too -- an entry reaches the phone before it reaches the network.
 
 ## Out of scope (do not build)
 
@@ -627,118 +568,3 @@ too -- an entry reaches the phone before it reaches the network.
 - Offline mode / service worker
 - Excel sheet integration
 - Any backend, API, or paid service
-
-## Urine Volume Logging
-
-### Overview
-Astronauts log urine volume via a 2-field form in the app. All other fields are
-auto-populated from the live mission clock and the logged-in user. Entries are
-stored in Firestore and exported as a single CSV at the end of the mission by
-FE07, the only account able to read the collection back.
-
-*(This originally posted to a private Google Sheet through an Apps Script web
-app. That path needed a publicly callable URL embedded in the page -- a write
-capability anyone reading the source could use -- and the deployment would not
-serve anonymous callers. Firestore already carries every other piece of mission
-state, so the void log goes there too and leaves as a CSV at the end.)*
-
-### What the astronaut sees
-A "Log Urine" button fixed to every screen, available at any mission time. It
-opens a form with exactly two inputs:
-
-- **Volume (mL)** -- a number.
-- **Colour (1-8)** -- eight swatches painted in the Armstrong scale's own
-  colours, so the crew matches a colour to a colour rather than translating one
-  into a number. The selected score shows its status text.
-
-### What the app records automatically (no astronaut input)
-- `crewCode` -- from the logged-in user's Firestore document
-- `missionDay` -- the current derived mission day
-- `missionTime` -- computed live: `T+HH:MM:SS` (empty if no day is anchored yet;
-  `utcDateTime` always allows it to be reconstructed afterwards)
-- `utcDateTime` -- `new Date().toISOString()` at the moment of submit
-- `uid` -- so the security rules can pin the entry to its author
-
-All of these are shown above the form, ticking live, so the astronaut can see
-what is being filed.
-
-### Storage
-
-The collection is `/voids` and the device queue key is `aatc-void-outbox`. Those
-names stay as they are: renaming the collection would orphan entries already
-filed, and renaming the queue key would strand any entry sitting unsent on a
-crew member's phone. The wording changed on screen only, where it matters.
-
-```
-/voids/{crewCode}_{utcDateTime}      // colons and dots replaced with hyphens
-  uid: string
-  crewCode: string
-  missionDay: number
-  missionTime: string
-  utcDateTime: string
-  volumeMl: number
-  colourScore: number
-```
-
-The document id is the crew code and the moment of the void, so a retry after a
-lost response overwrites the same document instead of creating a second one.
-A void cannot be duplicated.
-
-### Nothing is lost if the network is
-
-A void cannot be measured twice. Each entry is written to the device before
-Firestore is touched and stays there until the write is confirmed. The count of
-unsent entries shows on the Log Urine button; the queue is retried every minute,
-when the browser comes back online, and on the next submit.
-
-### Seeing and correcting your own entries
-
-A third tab, **My urine log**, sits beside Sessions and Crew dashboard for every
-crew member. It lists that person's own entries, newest first -- mission day,
-mission time, UTC, volume and the colour as its own swatch -- and nobody else's.
-
-**Edit** on a row reopens the form on that entry. Only the reading can change:
-volume and colour. Crew code, mission day, mission time and UTC stay pinned to
-what was written when the void happened, because that is the measurement's
-place in the record. A corrected entry is marked `corrected` in the list and
-carries `correctedAt` into the CSV, so a correction is visible as one rather
-than passing as the original reading.
-
-Corrections are written straight to Firestore instead of through the device
-queue. An unsent measurement must never be lost; an unsent correction can
-simply be made again.
-
-### Deleting
-
-**Delete** on a row removes the entry permanently, after a confirmation that
-names the crew code, day, mission time and volume rather than asking a vague
-question someone taps through while tired.
-
-A crew member can delete their own entries. The admin sees every entry in the
-Urine log panel and can delete anyone's -- a test value typed by another person
-cannot be corrected by anybody but its author, and it should not sit in the
-dataset. The display account can delete nothing.
-
-This is the one irreversible action in the app. It exists because a mission
-picks up junk during setup, and a dataset carrying invented numbers is worse
-than one missing a row.
-
-### Export
-
-FE07 (admin) sees a **Urine log** panel with **Download urine log (CSV)**. It
-reads the whole collection and writes one UTF-8 file:
-
-| A | B | C | D | E | F |
-|---|---|---|---|---|---|
-| Crew Code | Mission Day | Mission Time | UTC Date & Time | Volume (mL) | Colour (1-8) |
-
-Sorted by crew code, then by time. Rows are never updated or deleted from the
-app -- a measurement that has been taken is a fact.
-
-### Colour reference (Armstrong scale -- print and post near the toilet)
-| Score | Colour | Status |
-|---|---|---|
-| 1-2 | Pale straw | Well hydrated |
-| 3-4 | Yellow | Adequate |
-| 5-6 | Dark / amber | Mild dehydration |
-| 7-8 | Dark amber / brown | Dehydrated |

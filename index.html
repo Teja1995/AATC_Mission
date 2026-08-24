@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Mission Data Tracker — AATC</title>
-<link rel="stylesheet" href="style.css?v=17">
+<link rel="stylesheet" href="style.css?v=18">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#128752;</text></svg>">
 </head>
 <body>
@@ -161,51 +161,6 @@
       </div>
     </section>
 
-    <!-- Admin only (FE07): the urine log leaves the app here -->
-    <section class="card hidden" id="data-officer-panel">
-      <div class="panel-head">
-        <h2 style="color:var(--teal)">Urine log</h2>
-        <span class="hint" id="voids-hint">Health data &mdash; admin only</span>
-      </div>
-      <div class="panel-body">
-        <div class="row">
-          <button class="btn" id="export-voids-btn" type="button">Download urine log (CSV)</button>
-          <span class="hint">Every entry logged by the crew, all seven days, one file.</span>
-        </div>
-
-        <div class="row">
-          <span class="row-label">All urine entries</span>
-          <span class="hint" id="allvoids-summary">&mdash;</span>
-        </div>
-        <div id="allvoids-body"></div>
-
-        <div class="row" style="margin-top:24px">
-          <span class="row-label">Crew food list</span>
-          <span class="hint" id="fooditems-summary">&mdash;</span>
-        </div>
-        <div class="row">
-          <textarea id="fooditems-paste" rows="4"
-                    placeholder="One food per line:  barcode,name,kcal per 100 g&#10;Leave the barcode empty for anything unpackaged:  ,Chleb zytni,247"></textarea>
-        </div>
-        <div class="row">
-          <button class="btn" id="fooditems-add-btn" type="button">Add to the crew list</button>
-          <span class="hint">Entered once here, it fills itself in for everyone afterwards.</span>
-        </div>
-        <div id="fooditems-body"></div>
-
-        <div class="row" style="margin-top:24px">
-          <button class="btn" id="export-meals-btn" type="button">Download food log (CSV)</button>
-          <span class="hint">Energy intake per entry, with the barcode where there was one.</span>
-        </div>
-
-        <div class="row">
-          <span class="row-label">All food entries</span>
-          <span class="hint" id="allmeals-summary">&mdash;</span>
-        </div>
-        <div id="allmeals-body"></div>
-      </div>
-    </section>
-
     <!-- Day + session state -->
     <section class="card">
       <div class="day-strip">
@@ -218,8 +173,6 @@
     <div class="tabs">
       <button class="tab active" id="tab-sessions" type="button">Sessions</button>
       <button class="tab" id="tab-dashboard" type="button">Crew dashboard</button>
-      <button class="tab" id="tab-mylog" type="button">My urine log</button>
-      <button class="tab" id="tab-foodlog" type="button">My food log</button>
     </div>
 
     <nav class="session-nav" id="session-nav" aria-label="Mission sessions"></nav>
@@ -245,147 +198,8 @@
       </div>
     </section>
 
-    <section id="foodlog-view" class="card hidden">
-      <div class="panel-head">
-        <h2 style="color:var(--teal)">My food log</h2>
-        <span class="hint" id="foodlog-summary">&mdash;</span>
-      </div>
-      <div id="foodlog-body"></div>
-    </section>
-
-    <section id="mylog-view" class="card hidden">
-      <div class="panel-head">
-        <h2 style="color:var(--teal)">My urine log</h2>
-        <span class="hint" id="mylog-summary">&mdash;</span>
-      </div>
-      <div id="mylog-body"></div>
-    </section>
-
   </main>
 
-  <!-- Reachable from any screen, at any mission time. -->
-  <div class="fab-stack">
-    <div class="fab-menu hidden" id="fab-menu" role="menu">
-      <button class="fab-option" id="log-void-btn" type="button" role="menuitem">
-        <span class="fab-option-icon" aria-hidden="true">&#128167;</span>
-        <span>Log Urine</span>
-        <span class="fab-pending hidden" id="void-pending" title="Entries waiting to be sent">0</span>
-      </button>
-      <button class="fab-option" id="log-food-btn" type="button" role="menuitem">
-        <span class="fab-option-icon" aria-hidden="true">&#127860;</span>
-        <span>Log Food</span>
-        <span class="fab-pending hidden" id="food-pending" title="Entries waiting to be sent">0</span>
-      </button>
-    </div>
-
-    <button class="fab fab-round" id="fab-toggle" type="button"
-            aria-haspopup="true" aria-expanded="false" aria-label="Log something">
-      <span class="fab-plus" aria-hidden="true">+</span>
-      <span class="fab-pending fab-pending-total hidden" id="pending-total"
-            title="Entries waiting to be sent">0</span>
-    </button>
-  </div>
-
-  <div class="modal-backdrop hidden" id="food-modal" role="dialog" aria-modal="true" aria-labelledby="food-title">
-    <form class="modal" id="food-form">
-      <div class="modal-head">
-        <h2 id="food-title">Log Food</h2>
-        <button class="btn btn-small" id="food-close" type="button">Cancel</button>
-      </div>
-
-      <div class="modal-body">
-        <p class="modal-auto mono" id="food-auto">&mdash;</p>
-
-        <div class="field">
-          <label for="food-known">Known food</label>
-          <input type="text" id="food-known" list="food-known-list" autocomplete="off"
-                 placeholder="Start typing - the crew list fills the rest in">
-          <datalist id="food-known-list"></datalist>
-          <p class="hint" id="food-known-hint"></p>
-        </div>
-
-        <div class="field">
-          <label for="food-barcode">Barcode</label>
-          <div class="barcode-row">
-            <input type="text" id="food-barcode" inputmode="numeric" autocomplete="off"
-                   placeholder="Scan, or type the digits">
-            <button class="btn" id="food-scan-btn" type="button">Scan</button>
-            <button class="btn" id="food-lookup-btn" type="button">Look up</button>
-          </div>
-          <p class="hint" id="food-scan-hint"></p>
-        </div>
-
-        <div class="scanner hidden" id="food-scanner">
-          <video id="food-video" playsinline muted></video>
-          <button class="btn btn-small" id="food-scan-stop" type="button">Stop camera</button>
-        </div>
-
-        <div class="field">
-          <label for="food-name">Food</label>
-          <input type="text" id="food-name" maxlength="120" autocomplete="off"
-                 placeholder="Name — filled in by the lookup, or type it" required>
-        </div>
-
-        <div class="field">
-          <label for="food-kcal100">Energy (kcal per 100 g)</label>
-          <input type="number" id="food-kcal100" inputmode="decimal" min="0" max="2000" step="0.1"
-                 autocomplete="off" placeholder="from the barcode, or leave blank">
-        </div>
-
-        <div class="field">
-          <label for="food-grams">Amount eaten (g)</label>
-          <input type="number" id="food-grams" inputmode="decimal" min="0" max="5000" step="1"
-                 autocomplete="off" placeholder="e.g. 150">
-        </div>
-
-        <div class="field">
-          <label for="food-total">Total energy (kcal)</label>
-          <input type="number" id="food-total" inputmode="decimal" min="0" max="20000" step="1"
-                 autocomplete="off" placeholder="computed, or type it directly" required>
-          <p class="hint" id="food-total-hint">Computed from the amount when both figures are known. Always editable.</p>
-        </div>
-
-        <p class="error" id="food-error" role="alert"></p>
-      </div>
-
-      <div class="modal-foot">
-        <button class="btn btn-primary" id="food-submit" type="submit">Submit</button>
-      </div>
-    </form>
-  </div>
-
-  <div class="modal-backdrop hidden" id="void-modal" role="dialog" aria-modal="true" aria-labelledby="void-title">
-    <form class="modal" id="void-form">
-      <div class="modal-head">
-        <h2 id="void-title">Log Urine</h2>
-        <button class="btn btn-small" id="void-close" type="button" aria-label="Close">Cancel</button>
-      </div>
-
-      <div class="modal-body">
-        <p class="modal-auto mono" id="void-auto">&mdash;</p>
-
-        <div class="field">
-          <label for="void-volume">Volume (mL)</label>
-          <input type="number" id="void-volume" inputmode="numeric" min="1" max="3000" step="1"
-                 placeholder="e.g. 280" autocomplete="off" required>
-        </div>
-
-        <fieldset class="field colour-field">
-          <legend>Colour (1&ndash;8)</legend>
-          <div class="swatches" id="void-colours"></div>
-          <p class="swatch-caption" id="void-colour-caption">Match the chart posted by the toilet.</p>
-        </fieldset>
-
-        <p class="error" id="void-error" role="alert"></p>
-      </div>
-
-      <div class="modal-foot">
-        <button class="btn btn-primary" id="void-submit" type="submit">Submit</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<script type="module" src="app.js?v=17"></script>
+<script type="module" src="app.js?v=18"></script>
 </body>
 </html>

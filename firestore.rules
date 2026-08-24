@@ -25,11 +25,6 @@ service cloud.firestore {
       return isCrew() && profile().role in ['commander', 'admin'];
     }
 
-    // The urine log is read back by the admin alone.
-    function isAdmin() {
-      return isCrew() && profile().role == 'admin';
-    }
-
     // The wall display signs in as its own account and hangs unattended in a
     // shared space. It reads the mission day, the battery and the dashboard,
     // and it can write nothing at all -- nobody walking past a screen can mark
@@ -65,78 +60,6 @@ service cloud.firestore {
     match /tasks/{taskId} {
       allow read: if isCrew();
       allow write: if canCommand();
-    }
-
-    // Urine logs are health data. A crew member files their own, sees their own,
-    // and can correct or remove their own; only the admin reads the whole set,
-    // which is what the CSV export needs, and only the admin can remove someone
-    // else's. A correction stays on the record as a correction rather than
-    // replacing the original silently.
-    match /voids/{voidId} {
-      allow create: if filedBySelf();
-      // get and list are split deliberately. A list rule that inspects
-      // resource.data can only be satisfied by a query the engine can prove
-      // matches it; the export lists the whole collection, so its rule must
-      // stand on the caller alone.
-      allow get: if isAdmin()
-        || (isCrew() && resource.data.uid == request.auth.uid);
-      // The admin lists the whole collection for the export. A crew member's
-      // list is allowed only per-document, which Firestore can satisfy solely
-      // for a query already filtered to their own uid -- an unfiltered one is
-      // refused outright rather than quietly returning someone else's rows.
-      allow list: if isAdmin()
-        || (isCrew() && resource.data.uid == request.auth.uid);
-      // A crew member can correct their own reading -- 2800 for 280 is a
-      // typo, not a measurement -- but only the reading. Who filed it, and
-      // when, are pinned to what was written at the time.
-      allow update: if isCrew()
-        && !isDisplay()
-        && resource.data.uid == request.auth.uid
-        && request.resource.data.uid == resource.data.uid
-        && request.resource.data.crewCode == resource.data.crewCode
-        && request.resource.data.utcDateTime == resource.data.utcDateTime
-        && request.resource.data.missionDay == resource.data.missionDay
-        && request.resource.data.missionTime == resource.data.missionTime;
-      // Deletion is for what should never have been a measurement: a test
-      // entry, a mistaken double. It is not recoverable, so the app asks
-      // first. A crew member can remove their own; the admin, who holds the
-      // dataset, can remove anyone's. The display can remove nothing.
-      allow delete: if isAdmin()
-        || (isCrew() && !isDisplay() && resource.data.uid == request.auth.uid);
-    }
-
-    // Food logs sit under the same rules as urine logs: your own to file, see,
-    // correct and remove; the admin holds the whole set for the export. Energy
-    // is a criterion measure here, not a diary -- what one crew member eats is
-    // not the rest of the crew's business.
-    match /meals/{mealId} {
-      allow create: if filedBySelf();
-      allow get: if isAdmin()
-        || (isCrew() && resource.data.uid == request.auth.uid);
-      allow list: if isAdmin()
-        || (isCrew() && resource.data.uid == request.auth.uid);
-      // Only the amount eaten and what it was can be corrected. Who logged it
-      // and when are pinned to what was written at the time.
-      allow update: if isCrew()
-        && !isDisplay()
-        && resource.data.uid == request.auth.uid
-        && request.resource.data.uid == resource.data.uid
-        && request.resource.data.crewCode == resource.data.crewCode
-        && request.resource.data.utcDateTime == resource.data.utcDateTime
-        && request.resource.data.missionDay == resource.data.missionDay
-        && request.resource.data.missionTime == resource.data.missionTime;
-      allow delete: if isAdmin()
-        || (isCrew() && !isDisplay() && resource.data.uid == request.auth.uid);
-    }
-
-    // What the crew has identified by barcode. Reference data, not personal
-    // data: the food database is thin on Polish shelf products and knows
-    // nothing about repacked rations, so the first person to name one teaches
-    // it to everybody. Any crew member may add or improve an entry; the
-    // display, which cannot log food, cannot write here either.
-    match /foodItems/{barcode} {
-      allow read: if isCrew();
-      allow write: if isCrew() && !isDisplay();
     }
 
     match /completions/{docId} {
