@@ -130,6 +130,8 @@ Urine button, and it can write nothing at all.
 private urine log and every admin control on a wall in a shared space. Create a
 dedicated account instead:
 
+**By hand, in the console:**
+
 1. Firebase console → Authentication → Users → **Add user**, e.g.
    `aatc.display@yourdomain` with a long password. (Sign-up is closed to the
    public, so it has to be added here.)
@@ -139,6 +141,17 @@ dedicated account instead:
    `email: "<the address>"`.
 4. Open `display.html` on the Pi and sign in once. Firebase keeps the session,
    so the display comes back by itself after a reboot.
+
+**Or scripted**, if you would rather not hand-type a UID:
+
+    # serviceAccount.json in this folder, from
+    # Project settings -> Service accounts -> Generate new private key
+    DISPLAY_EMAIL=aatc.display@example.com     DISPLAY_PASSWORD='a-long-password-here'       node seed-display.js
+    rm serviceAccount.json
+
+Nothing else can do it: `users` is `allow write: if false` for every client, so
+the console and the Admin SDK are the only two paths. Delete the key when the
+script finishes — it bypasses every rule in the project.
 
 The rules give `role: "display"` read access to the mission day, tasks and
 completions, and refuse it every write — `filedBySelf()` and the urine-log
