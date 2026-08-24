@@ -24,8 +24,13 @@ Only the Commander can set the mission day start time.
 
 | Role | How identified | Privileges |
 |---|---|---|
-| Commander | Firestore `users/{uid}.role == "commander"` | Set mission day number + wake-up time; reset a day |
-| Astronaut | Firestore `users/{uid}.role == "astronaut"` | Mark own tests as done; view dashboard |
+| Commander | `users/{uid}.role == "commander"` | Set the mission day and its anchor; add and remove session tasks; reset a day |
+| Admin | `users/{uid}.role == "admin"` | Everything the Commander can do, plus reading and exporting the void log |
+| Astronaut | `users/{uid}.role == "astronaut"` | Mark own tests as done; view dashboard |
+
+FE04 is the Commanding Officer. FE07 administers the application and is the only
+account that can read the void log back. Every other crew member, FE01 included,
+is an astronaut with no additional privileges.
 
 There is no self-registration — accounts are created by running the seed script (see below)
 before Day 1. Each crew member receives their email + temporary password from the Data Officer.
@@ -40,10 +45,10 @@ before Day 1. Each crew member receives their email + temporary password from th
 | FE04 | emericduval2004@gmail.com | **commander** |
 | FE05 | mahmed@agh.edu.pl | astronaut |
 | FE06 | romamalenko241@gmail.com | astronaut |
-| FE07 | pedapudisrteja@gmail.com | astronaut |
+| FE07 | pedapudisrteja@gmail.com | **admin** |
 
-FE04 (Commanding Officer) is the only user with `role == "commander"`.
-All others have `role == "astronaut"`.
+FE04 (Commanding Officer) holds `role == "commander"`; FE07 holds
+`role == "admin"`. All others have `role == "astronaut"`.
 
 **Display name rule**: every user is displayed by their crew code only (FE01, FE02 … FE07).
 Real names are never shown anywhere in the UI or stored in Firestore.
@@ -557,7 +562,7 @@ the rules stop a crew member writing a completion under anyone else's uid.
 Astronauts log urine volume via a 2-field form in the app. All other fields are
 auto-populated from the live mission clock and the logged-in user. Entries are
 stored in Firestore and exported as a single CSV at the end of the mission by
-FE01 or FE07, who are the only people able to read the collection back.
+FE07, the only account able to read the collection back.
 
 *(This originally posted to a private Google Sheet through an Apps Script web
 app. That path needed a publicly callable URL embedded in the page -- a write
@@ -612,7 +617,7 @@ when the browser comes back online, and on the next submit.
 
 ### Export
 
-FE01 and FE07 see a **Void log** panel with **Download void log (CSV)**. It
+FE07 (admin) sees a **Void log** panel with **Download void log (CSV)**. It
 reads the whole collection and writes one UTF-8 file:
 
 | A | B | C | D | E | F |

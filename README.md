@@ -42,7 +42,7 @@ of eight swatches printed in the actual scale colours rather than typing a numbe
 Crew code, mission day, mission time and UTC are filled in from the live session and
 shown above the form so the astronaut can see what is being recorded.
 
-Entries are stored in Firestore under `/voids`, and **FE01 and FE07 see a Void log
+Entries are stored in Firestore under `/voids`, and **FE07 (admin) sees a Void log
 panel with "Download void log (CSV)"** — one UTF-8 file, all seven days, columns
 `Crew Code, Mission Day, Mission Time, UTC Date & Time, Volume (mL), Colour (1-8)`,
 sorted by crew code then time. Nobody else can read the collection back; a crew
@@ -91,3 +91,19 @@ actions → uncheck "Enable create (sign-up)"**. All seven crew accounts already
 exist; nothing in the app ever needs to create another.
 
 Republish `firestore.rules` after pulling this change.
+
+## Roles
+
+| Crew code | `users/{uid}.role` | Can do |
+|---|---|---|
+| FE04 | `commander` | Mission Control: set the day and its anchor, add and remove tasks, reset a day |
+| FE07 | `admin` | Everything the commander can, plus reading and exporting the void log |
+| all others | `astronaut` | Mark their own tests done, view the dashboard |
+
+The role lives in the user's Firestore document and is the only thing the rules
+consult — no crew code is hardcoded anywhere. `seed.js` carries each role with
+the roster, so re-running it cannot silently demote anyone.
+
+**FE07's document must read `role: "admin"`.** Set it in the Firebase console
+(Firestore → `users` → FE07's document → `role` → `admin`) or re-run `seed.js`.
+Until then FE07 is an ordinary astronaut and the Void log panel will not appear.

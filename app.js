@@ -17,7 +17,7 @@ import {
   setDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=8";
+import { firebaseConfig } from "./firebase-config.js?v=9";
 
 // Armstrong urine colour scale. The swatches on screen carry these colours so
 // the crew matches a colour to a colour, not a colour to a number — the printed
@@ -36,9 +36,9 @@ const COLOUR_SCALE = [
 const VOID_OUTBOX_KEY = "aatc-void-outbox";
 const ASSIGN_ALL = "ALL";
 
-// Void logs are health data. Only the two crew members named in the protocol
-// can read them back or export them; everyone else can only add their own.
-const DATA_OFFICERS = ["FE01", "FE07"];
+// Three roles. The commander runs the mission day; the admin runs the
+// application and holds the void log as well. Everyone else is crew.
+const COMMAND_ROLES = ["commander", "admin"];
 
 const CREW_CODES = ["FE01", "FE02", "FE03", "FE04", "FE05", "FE06", "FE07"];
 const SESSION_ACCENTS = ["s1", "s2", "s3", "s4"];
@@ -191,6 +191,16 @@ function activeSession(seconds) {
 }
 
 /* --------------------------------------------------------------- helpers -- */
+
+// FE04 commands the mission, FE07 administers the app. Both drive Mission
+// Control; only the admin can read the void log back.
+function canCommand() {
+  return COMMAND_ROLES.includes(state.profile?.role);
+}
+
+function isAdmin() {
+  return state.profile?.role === "admin";
+}
 
 function testApplies(test, day) {
   const key = test[2];
@@ -361,7 +371,7 @@ function renderItem(item, sessionNumber) {
     ? `<span class="assignee ${item.assignedTo === ASSIGN_ALL ? "all" : ""}">${
         item.assignedTo === ASSIGN_ALL ? "Everyone" : item.assignedTo}</span>`
     : "";
-  const removal = item.taskId && state.profile?.role === "commander"
+  const removal = item.taskId && canCommand()
     ? `<button class="btn-remove" type="button" data-remove-task="${item.taskId}" data-title="${escapeAttr(item.label)}" title="Remove task" aria-label="Remove task">✕</button>`
     : "";
 
@@ -489,7 +499,7 @@ function playSessionChime(sessionIndex) {
 /* --------------------------------------------------------- commander ops -- */
 
 function syncDaySelect() {
-  if (state.profile?.role === "commander") $("day-select").value = String(state.day);
+  if (canCommand()) $("day-select").value = String(state.day);
 }
 
 function updateAnchorPreview() {
@@ -733,7 +743,7 @@ async function removeTask(taskId, title) {
 }
 
 function renderTaskList() {
-  if (state.profile?.role !== "commander") return;
+  if (!canCommand()) return;
   $("tasks-panel-day").textContent = `Mission Day ${state.day}`;
 
   const entries = [...state.tasks.entries()]
@@ -1048,10 +1058,10 @@ function enterApp() {
   $("login-view").classList.add("hidden");
   $("app-view").classList.remove("hidden");
   $("crew-chip").textContent = state.profile.crewCode;
-  $("crew-chip").classList.toggle("commander", state.profile.role === "commander");
-  $("commander-panel").classList.toggle("hidden", state.profile.role !== "commander");
-  $("tasks-panel").classList.toggle("hidden", state.profile.role !== "commander");
-  $("data-officer-panel").classList.toggle("hidden", !DATA_OFFICERS.includes(state.profile.crewCode));
+  $("crew-chip").classList.toggle("commander", canCommand());
+  $("commander-panel").classList.toggle("hidden", !canCommand());
+  $("tasks-panel").classList.toggle("hidden", !canCommand());
+  $("data-officer-panel").classList.toggle("hidden", !isAdmin());
   syncDaySelect();
   renderTaskList();
   subscribeMissionDays();
