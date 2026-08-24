@@ -18,7 +18,7 @@ import {
   updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=13";
+import { firebaseConfig } from "./firebase-config.js?v=14";
 import {
   ACTIVE_DAY_DOC,
   ASSIGN_ALL,
@@ -37,7 +37,7 @@ import {
   sessionItems as sessionItemsFor,
   utcString,
   visibleTests,
-} from "./mission.js?v=13";
+} from "./mission.js?v=14";
 
 // Armstrong urine colour scale. The swatches on screen carry these colours so
 // the crew matches a colour to a colour, not a colour to a number — the printed
@@ -85,6 +85,8 @@ const state = {
   voidColour: null,          // Armstrong score selected in the Log Urine form
   myVoids: new Map(),        // this crew member's own entries
   myVoidsUnsubscribe: null,
+  allVoids: new Map(),       // every entry, admin only
+  allVoidsUnsubscribe: null,
   editingVoidId: null,       // set while correcting an existing entry
 };
 
@@ -505,7 +507,12 @@ function clearSubscriptions() {
     state.myVoidsUnsubscribe();
     state.myVoidsUnsubscribe = null;
   }
+  if (state.allVoidsUnsubscribe) {
+    state.allVoidsUnsubscribe();
+    state.allVoidsUnsubscribe = null;
+  }
   state.myVoids = new Map();
+  state.allVoids = new Map();
   state.dayDataDay = null;
   state.anchors = new Map();
   state.completions = new Map();
@@ -660,6 +667,30 @@ function subscribeMyVoids() {
   }, (error) => showToast(`Your urine log is unavailable: ${describeError(error)}`, true));
 }
 
+// Deleting a measurement cannot be undone, so the confirmation names the entry
+// rather than asking a vague question someone taps through at 3 a.m.
+async function deleteVoid(id, entry) {
+  const what = `${entry.crewCode} · Day ${entry.missionDay} · ${entry.missionTime || "no mission time"} · ${entry.volumeMl} mL`;
+  if (!window.confirm(`Delete this entry permanently?
+
+${what}
+
+This cannot be undone.`)) return;
+  try {
+    await deleteDoc(doc(db, "voids", id));
+    showToast("Entry deleted.");
+  } catch (error) {
+    showToast(`Could not delete: ${describeError(error)}`, true);
+  }
+}
+
+function voidRowActions(container, source) {
+  container.querySelectorAll("[data-delete-void]").forEach((button) => {
+    const id = button.dataset.deleteVoid;
+    button.addEventListener("click", () => deleteVoid(id, source.get(id)));
+  });
+}
+
 function renderMyLog() {
   const entries = [...state.myVoids.entries()]
     .sort((a, b) => String(b[1].utcDateTime).localeCompare(String(a[1].utcDateTime)));
@@ -686,12 +717,58 @@ function renderMyLog() {
             style="background:${colour ? colour.hex : "transparent"};color:${colour ? colour.ink : "inherit"}">${entry.colourScore}</span>
       ${entry.correctedAt ? '<span class="corrected" title="Corrected after filing">corrected</span>' : ""}
       <button class="btn btn-small" type="button" data-edit-void="${id}">Edit</button>
+      <button class="btn btn-small btn-danger" type="button" data-delete-void="${id}">Delete</button>
     </div>`;
   }).join("");
 
   $("mylog-body").querySelectorAll("[data-edit-void]").forEach((button) => {
     button.addEventListener("click", () => openVoidModal(button.dataset.editVoid));
   });
+  voidRowActions($("mylog-body"), state.myVoids);
+}
+
+// The admin sees every entry, because the junk that has to go is rarely their
+// own -- a test value typed by somebody else cannot be corrected by anyone but
+// its author, and it should not be in the dataset at all.
+function subscribeAllVoids() {
+  if (!db || !isAdmin()) return;
+  if (state.allVoidsUnsubscribe) state.allVoidsUnsubscribe();
+  state.allVoidsUnsubscribe = onSnapshot(collection(db, "voids"), (snapshot) => {
+    state.allVoids = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
+    renderAllVoids();
+  }, (error) => showToast(`Urine log unavailable: ${describeError(error)}`, true));
+}
+
+function renderAllVoids() {
+  const entries = [...state.allVoids.entries()]
+    .sort((a, b) => String(b[1].utcDateTime).localeCompare(String(a[1].utcDateTime)));
+
+  $("allvoids-summary").textContent = entries.length
+    ? `${entries.length} ${entries.length === 1 ? "entry" : "entries"}, newest first`
+    : "nothing logged yet";
+
+  if (!entries.length) {
+    $("allvoids-body").innerHTML = "";
+    return;
+  }
+
+  $("allvoids-body").innerHTML = entries.map(([id, entry]) => {
+    const colour = COLOUR_SCALE.find((item) => item.score === Number(entry.colourScore));
+    return `<div class="mylog-row">
+      <span class="crew-chip">${escapeHtml(String(entry.crewCode))}</span>
+      <span class="mylog-when">
+        <strong>Day ${entry.missionDay}</strong>
+        <span class="mono">${entry.missionTime || "T+--:--:--"}</span>
+        <small class="mono">${String(entry.utcDateTime).replace("T", " ").slice(0, 19)} UTC</small>
+      </span>
+      <span class="mylog-volume mono">${entry.volumeMl} mL</span>
+      <span class="mylog-colour" style="background:${colour ? colour.hex : "transparent"};color:${colour ? colour.ink : "inherit"}">${entry.colourScore}</span>
+      ${entry.correctedAt ? '<span class="corrected">corrected</span>' : ""}
+      <button class="btn btn-small btn-danger" type="button" data-delete-void="${id}">Delete</button>
+    </div>`;
+  }).join("");
+
+  voidRowActions($("allvoids-body"), state.allVoids);
 }
 
 // A void cannot be measured twice. Every entry is written to the device before
@@ -1033,6 +1110,7 @@ function enterApp() {
   subscribeMissionDays();
   subscribeDayData();
   subscribeMyVoids();
+  subscribeAllVoids();
   paint(true);
 }
 

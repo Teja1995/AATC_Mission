@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Mission Data Tracker — AATC</title>
-<link rel="stylesheet" href="style.css?v=13">
+<link rel="stylesheet" href="style.css?v=14">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#128752;</text></svg>">
 </head>
 <body>
@@ -172,6 +172,12 @@
           <button class="btn" id="export-voids-btn" type="button">Download urine log (CSV)</button>
           <span class="hint">Every entry logged by the crew, all seven days, one file.</span>
         </div>
+
+        <div class="row">
+          <span class="row-label">All entries</span>
+          <span class="hint" id="allvoids-summary">&mdash;</span>
+        </div>
+        <div id="allvoids-body"></div>
       </div>
     </section>
 
@@ -261,6 +267,6 @@
   </div>
 </div>
 
-<script type="module" src="app.js?v=13"></script>
+<script type="module" src="app.js?v=14"></script>
 </body>
 </html>

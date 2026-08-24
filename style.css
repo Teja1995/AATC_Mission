@@ -900,3 +900,9 @@ tr.sess-row.s4 td { color: var(--pink); }
 @media (max-width: 480px) {
   .mylog-when { flex: 1 1 100%; }
 }
+
+/* Delete controls sit next to Edit; kept small so the row still reads as data. */
+.mylog-row .btn-small { flex: 0 0 auto; }
+.mylog-row .crew-chip { flex: 0 0 auto; }
+
+#allvoids-body { margin-top: 4px; max-height: 420px; overflow-y: auto; }

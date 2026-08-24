@@ -67,11 +67,11 @@ service cloud.firestore {
       allow write: if canCommand();
     }
 
-    // Urine logs are health data. A crew member files their own, sees their own
-    // and can correct their own reading; only the admin reads the whole set,
-    // which is what the CSV export needs. Nothing is ever deleted -- a
-    // measurement that has been taken is a fact, and a correction says so on
-    // the record rather than replacing it silently.
+    // Urine logs are health data. A crew member files their own, sees their own,
+    // and can correct or remove their own; only the admin reads the whole set,
+    // which is what the CSV export needs, and only the admin can remove someone
+    // else's. A correction stays on the record as a correction rather than
+    // replacing the original silently.
     match /voids/{voidId} {
       allow create: if filedBySelf();
       // get and list are split deliberately. A list rule that inspects
@@ -97,7 +97,12 @@ service cloud.firestore {
         && request.resource.data.utcDateTime == resource.data.utcDateTime
         && request.resource.data.missionDay == resource.data.missionDay
         && request.resource.data.missionTime == resource.data.missionTime;
-      allow delete: if false;
+      // Deletion is for what should never have been a measurement: a test
+      // entry, a mistaken double. It is not recoverable, so the app asks
+      // first. A crew member can remove their own; the admin, who holds the
+      // dataset, can remove anyone's. The display can remove nothing.
+      allow delete: if isAdmin()
+        || (isCrew() && !isDisplay() && resource.data.uid == request.auth.uid);
     }
 
     match /completions/{docId} {

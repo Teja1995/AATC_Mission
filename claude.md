@@ -662,7 +662,20 @@ Corrections are written straight to Firestore instead of through the device
 queue. An unsent measurement must never be lost; an unsent correction can
 simply be made again.
 
-Nothing can be deleted from the app.
+### Deleting
+
+**Delete** on a row removes the entry permanently, after a confirmation that
+names the crew code, day, mission time and volume rather than asking a vague
+question someone taps through while tired.
+
+A crew member can delete their own entries. The admin sees every entry in the
+Urine log panel and can delete anyone's -- a test value typed by another person
+cannot be corrected by anybody but its author, and it should not sit in the
+dataset. The display account can delete nothing.
+
+This is the one irreversible action in the app. It exists because a mission
+picks up junk during setup, and a dataset carrying invented numbers is worse
+than one missing a row.
 
 ### Export
 

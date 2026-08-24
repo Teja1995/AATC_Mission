@@ -57,8 +57,14 @@ A **My urine log** tab beside Sessions and Crew dashboard shows each crew member
 their own entries, newest first, and nobody else's. **Edit** reopens the form on
 that entry; only volume and colour can change, while crew code, mission day,
 mission time and UTC stay pinned to what was filed. A corrected row is labelled
-`corrected` and carries a `Corrected (UTC)` column into the CSV. Nothing can be
-deleted from the app.
+`corrected` and carries a `Corrected (UTC)` column into the CSV.
+
+**Delete** removes an entry permanently, after a confirmation naming it. A crew
+member can delete their own; **FE07 (admin) sees every entry in the Urine log
+panel and can delete anyone's** — test values typed by someone else cannot be
+corrected by anybody but their author, and they should not be in the dataset at
+all. The display account can delete nothing. There is no undo: a deleted row is
+gone from Firestore and from every later export.
 
 ### Nothing is lost if the network is
 
