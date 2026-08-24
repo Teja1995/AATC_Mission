@@ -51,6 +51,15 @@ member can only add their own entries. Nothing is ever updated or deleted.
 The document id is the crew code plus the moment of the void, so a retry after a
 lost response overwrites the same document rather than adding a second row.
 
+### Seeing and correcting your own entries
+
+A **My urine log** tab beside Sessions and Crew dashboard shows each crew member
+their own entries, newest first, and nobody else's. **Edit** reopens the form on
+that entry; only volume and colour can change, while crew code, mission day,
+mission time and UTC stay pinned to what was filed. A corrected row is labelled
+`corrected` and carries a `Corrected (UTC)` column into the CSV. Nothing can be
+deleted from the app.
+
 ### Nothing is lost if the network is
 
 A void cannot be measured twice, so an entry is written to the device before the

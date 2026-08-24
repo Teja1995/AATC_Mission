@@ -850,3 +850,53 @@ tr.sess-row.s4 td { color: var(--pink); }
   font-size: 11px;
   white-space: nowrap;
 }
+
+/* ---------- My urine log ---------- */
+
+.mylog-row {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 11px 16px;
+}
+
+.mylog-row:last-child { border-bottom: none; }
+
+.mylog-when {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.mylog-when small { color: var(--muted); font-size: 11px; }
+.mylog-when .mono { color: var(--teal); font-size: 13px; }
+
+.mylog-volume { font-size: 15px; font-weight: 700; white-space: nowrap; }
+
+.mylog-colour {
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 26px;
+  padding: 3px 7px;
+  text-align: center;
+}
+
+.corrected {
+  background: rgba(240, 180, 41, .14);
+  border-radius: 999px;
+  color: var(--amber);
+  font-size: 11px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .mylog-when { flex: 1 1 100%; }
+}

@@ -15,9 +15,10 @@ import {
   onSnapshot,
   query,
   setDoc,
+  updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=11";
+import { firebaseConfig } from "./firebase-config.js?v=12";
 
 // Armstrong urine colour scale. The swatches on screen carry these colours so
 // the crew matches a colour to a colour, not a colour to a number — the printed
@@ -120,6 +121,9 @@ const state = {
   selectedSession: null,
   renderKey: "",
   voidColour: null,          // Armstrong score selected in the Log Urine form
+  myVoids: new Map(),        // this crew member's own entries
+  myVoidsUnsubscribe: null,
+  editingVoidId: null,       // set while correcting an existing entry
 };
 
 const configured = !Object.values(firebaseConfig).some(
@@ -633,6 +637,11 @@ function clearSubscriptions() {
     state.tasksUnsubscribe();
     state.tasksUnsubscribe = null;
   }
+  if (state.myVoidsUnsubscribe) {
+    state.myVoidsUnsubscribe();
+    state.myVoidsUnsubscribe = null;
+  }
+  state.myVoids = new Map();
   state.dayDataDay = null;
   state.anchors = new Map();
   state.completions = new Map();
@@ -775,6 +784,52 @@ function renderTaskList() {
 
 /* ------------------------------------------------------------- log void -- */
 
+// A crew member sees their own entries and nobody else's. The query is filtered
+// by uid because the rule is per-document: an unfiltered list is refused.
+function subscribeMyVoids() {
+  if (!db || !state.user) return;
+  if (state.myVoidsUnsubscribe) state.myVoidsUnsubscribe();
+  const mine = query(collection(db, "voids"), where("uid", "==", state.user.uid));
+  state.myVoidsUnsubscribe = onSnapshot(mine, (snapshot) => {
+    state.myVoids = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
+    renderMyLog();
+  }, (error) => showToast(`Your urine log is unavailable: ${describeError(error)}`, true));
+}
+
+function renderMyLog() {
+  const entries = [...state.myVoids.entries()]
+    .sort((a, b) => String(b[1].utcDateTime).localeCompare(String(a[1].utcDateTime)));
+
+  $("mylog-summary").textContent = entries.length
+    ? `${entries.length} ${entries.length === 1 ? "entry" : "entries"}`
+    : "";
+
+  if (!entries.length) {
+    $("mylog-body").innerHTML = '<p class="empty">Nothing logged yet. Use the Log Urine button.</p>';
+    return;
+  }
+
+  $("mylog-body").innerHTML = entries.map(([id, entry]) => {
+    const colour = COLOUR_SCALE.find((item) => item.score === Number(entry.colourScore));
+    return `<div class="mylog-row">
+      <span class="mylog-when">
+        <strong>Day ${entry.missionDay}</strong>
+        <span class="mono">${entry.missionTime || "T+--:--:--"}</span>
+        <small class="mono">${String(entry.utcDateTime).replace("T", " ").slice(0, 19)} UTC</small>
+      </span>
+      <span class="mylog-volume mono">${entry.volumeMl} mL</span>
+      <span class="mylog-colour" title="Colour ${entry.colourScore}${colour ? ` — ${colour.status}` : ""}"
+            style="background:${colour ? colour.hex : "transparent"};color:${colour ? colour.ink : "inherit"}">${entry.colourScore}</span>
+      ${entry.correctedAt ? '<span class="corrected" title="Corrected after filing">corrected</span>' : ""}
+      <button class="btn btn-small" type="button" data-edit-void="${id}">Edit</button>
+    </div>`;
+  }).join("");
+
+  $("mylog-body").querySelectorAll("[data-edit-void]").forEach((button) => {
+    button.addEventListener("click", () => openVoidModal(button.dataset.editVoid));
+  });
+}
+
 // A void cannot be measured twice. Every entry is written to the device before
 // the network is touched, and stays there until the sheet has taken it — so a
 // dead connection, a closed lid or a refresh mid-submit costs nothing.
@@ -863,6 +918,7 @@ const VOID_CSV_COLUMNS = [
   ["utcDateTime", "UTC Date & Time"],
   ["volumeMl", "Volume (mL)"],
   ["colourScore", "Colour (1-8)"],
+  ["correctedAt", "Corrected (UTC)"],
 ];
 
 function csvCell(value) {
@@ -931,6 +987,20 @@ function selectColour(score) {
 
 function updateVoidAuto() {
   if ($("void-modal").classList.contains("hidden")) return;
+
+  // While correcting, show the entry's own time. The clock has moved on since
+  // it was filed, and that original moment is what stays on the record.
+  const existing = state.editingVoidId ? state.myVoids.get(state.editingVoidId) : null;
+  if (existing) {
+    $("void-auto").textContent = [
+      existing.crewCode,
+      `Mission Day ${existing.missionDay}`,
+      existing.missionTime || "T+--:--:--",
+      `${String(existing.utcDateTime).replace("T", "  ").slice(0, 19)} UTC`,
+    ].join("   ·   ");
+    return;
+  }
+
   const clock = resolveClock();
   $("void-auto").textContent = [
     state.profile?.crewCode ?? "—",
@@ -940,20 +1010,34 @@ function updateVoidAuto() {
   ].join("   ·   ");
 }
 
-function openVoidModal() {
+function openVoidModal(editId = null) {
   if (!state.profile) return;
+  const existing = editId ? state.myVoids.get(editId) : null;
+
+  state.editingVoidId = existing ? editId : null;
   state.voidColour = null;
   $("void-form").reset();
   $("void-error").textContent = "";
   $("void-colour-caption").textContent = "Match the chart posted by the toilet.";
   document.querySelectorAll("[data-colour]").forEach((button) => button.classList.remove("selected"));
+
+  $("void-title").textContent = existing ? "Correct entry" : "Log Urine";
+  $("void-submit").textContent = existing ? "Save correction" : "Submit";
+
+  if (existing) {
+    $("void-volume").value = existing.volumeMl;
+    selectColour(Number(existing.colourScore));
+  }
+
   $("void-modal").classList.remove("hidden");
   updateVoidAuto();
   $("void-volume").focus();
+  $("void-volume").select();
 }
 
 function closeVoidModal() {
   $("void-modal").classList.add("hidden");
+  state.editingVoidId = null;
 }
 
 async function submitVoid(event) {
@@ -965,6 +1049,24 @@ async function submitVoid(event) {
   }
   if (state.voidColour === null) {
     $("void-error").textContent = "Select the colour that matches the chart.";
+    return;
+  }
+
+  // A correction changes the reading, never who filed it or when. It goes
+  // straight to Firestore rather than through the queue: an unsent measurement
+  // must not be lost, but an unsent correction can simply be made again.
+  if (state.editingVoidId) {
+    try {
+      await updateDoc(doc(db, "voids", state.editingVoidId), {
+        volumeMl,
+        colourScore: state.voidColour,
+        correctedAt: new Date().toISOString(),
+      });
+      closeVoidModal();
+      showToast("Entry corrected.");
+    } catch (error) {
+      $("void-error").textContent = describeError(error);
+    }
     return;
   }
 
@@ -1017,6 +1119,7 @@ function configureUi() {
   $("reset-day-btn").addEventListener("click", resetDay);
   $("tab-sessions").addEventListener("click", () => switchTab("sessions"));
   $("tab-dashboard").addEventListener("click", () => switchTab("dashboard"));
+  $("tab-mylog").addEventListener("click", () => switchTab("mylog"));
 
   $("task-assignee").innerHTML = `<option value="${ASSIGN_ALL}">Everyone</option>`
     + CREW_CODES.map((code) => `<option value="${code}">${code}</option>`).join("");
@@ -1044,12 +1147,13 @@ function configureUi() {
 }
 
 function switchTab(tab) {
-  const sessions = tab === "sessions";
-  $("session-nav").classList.toggle("hidden", !sessions);
-  $("sessions-view").classList.toggle("hidden", !sessions);
-  $("dashboard-view").classList.toggle("hidden", sessions);
-  $("tab-sessions").classList.toggle("active", sessions);
-  $("tab-dashboard").classList.toggle("active", !sessions);
+  $("session-nav").classList.toggle("hidden", tab !== "sessions");
+  $("sessions-view").classList.toggle("hidden", tab !== "sessions");
+  $("dashboard-view").classList.toggle("hidden", tab !== "dashboard");
+  $("mylog-view").classList.toggle("hidden", tab !== "mylog");
+  $("tab-sessions").classList.toggle("active", tab === "sessions");
+  $("tab-dashboard").classList.toggle("active", tab === "dashboard");
+  $("tab-mylog").classList.toggle("active", tab === "mylog");
 }
 
 function enterApp() {
@@ -1064,6 +1168,7 @@ function enterApp() {
   renderTaskList();
   subscribeMissionDays();
   subscribeDayData();
+  subscribeMyVoids();
   paint(true);
 }
 

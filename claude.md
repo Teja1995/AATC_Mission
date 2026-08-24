@@ -622,6 +622,25 @@ Firestore is touched and stays there until the write is confirmed. The count of
 unsent entries shows on the Log Urine button; the queue is retried every minute,
 when the browser comes back online, and on the next submit.
 
+### Seeing and correcting your own entries
+
+A third tab, **My urine log**, sits beside Sessions and Crew dashboard for every
+crew member. It lists that person's own entries, newest first -- mission day,
+mission time, UTC, volume and the colour as its own swatch -- and nobody else's.
+
+**Edit** on a row reopens the form on that entry. Only the reading can change:
+volume and colour. Crew code, mission day, mission time and UTC stay pinned to
+what was written when the void happened, because that is the measurement's
+place in the record. A corrected entry is marked `corrected` in the list and
+carries `correctedAt` into the CSV, so a correction is visible as one rather
+than passing as the original reading.
+
+Corrections are written straight to Firestore instead of through the device
+queue. An unsent measurement must never be lost; an unsent correction can
+simply be made again.
+
+Nothing can be deleted from the app.
+
 ### Export
 
 FE07 (admin) sees a **Urine log** panel with **Download urine log (CSV)**. It

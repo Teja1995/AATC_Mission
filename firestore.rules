@@ -58,10 +58,11 @@ service cloud.firestore {
       allow write: if canCommand();
     }
 
-    // Void logs are health data. A crew member files their own and can read
-    // their own back; only the admin reads the whole set, which is what the
-    // CSV export needs. Nothing is ever updated or deleted -- a
-    // measurement that has been taken is a fact.
+    // Urine logs are health data. A crew member files their own, sees their own
+    // and can correct their own reading; only the admin reads the whole set,
+    // which is what the CSV export needs. Nothing is ever deleted -- a
+    // measurement that has been taken is a fact, and a correction says so on
+    // the record rather than replacing it silently.
     match /voids/{voidId} {
       allow create: if filedBySelf();
       // get and list are split deliberately. A list rule that inspects
@@ -70,8 +71,23 @@ service cloud.firestore {
       // stand on the caller alone.
       allow get: if isAdmin()
         || (isCrew() && resource.data.uid == request.auth.uid);
-      allow list: if isAdmin();
-      allow update, delete: if false;
+      // The admin lists the whole collection for the export. A crew member's
+      // list is allowed only per-document, which Firestore can satisfy solely
+      // for a query already filtered to their own uid -- an unfiltered one is
+      // refused outright rather than quietly returning someone else's rows.
+      allow list: if isAdmin()
+        || (isCrew() && resource.data.uid == request.auth.uid);
+      // A crew member can correct their own reading -- 2800 for 280 is a
+      // typo, not a measurement -- but only the reading. Who filed it, and
+      // when, are pinned to what was written at the time.
+      allow update: if isCrew()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.crewCode == resource.data.crewCode
+        && request.resource.data.utcDateTime == resource.data.utcDateTime
+        && request.resource.data.missionDay == resource.data.missionDay
+        && request.resource.data.missionTime == resource.data.missionTime;
+      allow delete: if false;
     }
 
     match /completions/{docId} {
