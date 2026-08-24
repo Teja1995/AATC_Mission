@@ -33,6 +33,9 @@ const crew = [
   { crewCode: "FE05", email: "mahmed@agh.edu.pl", role: "astronaut" },
   { crewCode: "FE06", email: "romamalenko241@gmail.com", role: "astronaut" },
   { crewCode: "FE07", email: "pedapudisrteja@gmail.com", role: "admin" },
+  // The wall display. Not a person: it signs in on the Raspberry Pi, reads the
+  // mission, and is refused every write by the rules.
+  { crewCode: "DISPLAY", email: "aatc.display@example.com", role: "display" },
 ];
 
 async function findOrCreateUser(member) {

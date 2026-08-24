@@ -25,15 +25,24 @@ service cloud.firestore {
       return isCrew() && profile().role in ['commander', 'admin'];
     }
 
-    // The void log is read back by the admin alone.
+    // The urine log is read back by the admin alone.
     function isAdmin() {
       return isCrew() && profile().role == 'admin';
+    }
+
+    // The wall display signs in as its own account and hangs unattended in a
+    // shared space. It reads the mission day, the battery and the dashboard,
+    // and it can write nothing at all -- nobody walking past a screen can mark
+    // a test done or file a measurement.
+    function isDisplay() {
+      return isCrew() && profile().role == 'display';
     }
 
     // A document filed by one crew member must not be able to claim another's
     // crew code -- that is what the dashboard and the exported CSV read.
     function filedBySelf() {
       return isCrew()
+        && !isDisplay()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.crewCode == profile().crewCode;
     }
@@ -81,6 +90,7 @@ service cloud.firestore {
       // typo, not a measurement -- but only the reading. Who filed it, and
       // when, are pinned to what was written at the time.
       allow update: if isCrew()
+        && !isDisplay()
         && resource.data.uid == request.auth.uid
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.crewCode == resource.data.crewCode

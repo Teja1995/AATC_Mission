@@ -116,3 +116,52 @@ the roster, so re-running it cannot silently demote anyone.
 **FE07's document must read `role: "admin"`.** Set it in the Firebase console
 (Firestore → `users` → FE07's document → `role` → `admin`) or re-run `seed.js`.
 Until then FE07 is an ordinary astronaut and the Void log panel will not appear.
+
+## Wall display (Raspberry Pi)
+
+`display.html` is a separate, read-only page for a screen left running in the
+habitat: mission clock, mission day, the session due now, what is next, and the
+crew dashboard. It has no Mission Control, no Add task, no urine log and no Log
+Urine button, and it can write nothing at all.
+
+    https://teja1995.github.io/AATC_Mission/display.html
+
+**Never sign the Pi in as a crew member.** A crew login puts that person's
+private urine log and every admin control on a wall in a shared space. Create a
+dedicated account instead:
+
+1. Firebase console → Authentication → Users → **Add user**, e.g.
+   `aatc.display@yourdomain` with a long password. (Sign-up is closed to the
+   public, so it has to be added here.)
+2. Copy the new user's UID.
+3. Firestore → `users` → **Add document**, ID = that UID, fields:
+   `crewCode: "DISPLAY"`, `displayName: "DISPLAY"`, `role: "display"`,
+   `email: "<the address>"`.
+4. Open `display.html` on the Pi and sign in once. Firebase keeps the session,
+   so the display comes back by itself after a reboot.
+
+The rules give `role: "display"` read access to the mission day, tasks and
+completions, and refuse it every write — `filedBySelf()` and the urine-log
+update rule both exclude it. Someone walking past the screen cannot mark a test
+done or file a measurement.
+
+`DISPLAY` is not in `CREW_CODES`, so it never appears on the dashboard as a
+person who owes anything.
+
+The page reloads itself every 12 hours, so a browser that has quietly lost its
+Firestore stream recovers on its own instead of showing a frozen clock.
+
+### Kiosk mode on the Pi
+
+    chromium-browser --kiosk --noerrdialogs --disable-infobars \
+      --incognito=false \
+      https://teja1995.github.io/AATC_Mission/display.html
+
+Leave incognito off, or the sign-in is lost at every reboot.
+
+## Shared mission module
+
+`mission.js` holds the task battery, the session windows, the clock arithmetic
+and the item model. Both `app.js` and `display.js` import it, so the screen on
+the wall cannot disagree with the phone in someone's hand about what is due or
+what day it is. Run its checks with `node tests/mission.test.mjs`.

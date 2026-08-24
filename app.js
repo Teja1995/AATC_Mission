@@ -18,7 +18,26 @@ import {
   updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=12";
+import { firebaseConfig } from "./firebase-config.js?v=13";
+import {
+  ACTIVE_DAY_DOC,
+  ASSIGN_ALL,
+  CREW_CODES,
+  DAY_MS,
+  MAX_DAY,
+  SESSIONS,
+  SESSION_ACCENTS,
+  activeSession,
+  doneCodes as doneCodesFor,
+  escapeAttr,
+  escapeHtml,
+  formatMission,
+  resolveClock as resolveClockFrom,
+  rosterFor,
+  sessionItems as sessionItemsFor,
+  utcString,
+  visibleTests,
+} from "./mission.js?v=13";
 
 // Armstrong urine colour scale. The swatches on screen carry these colours so
 // the crew matches a colour to a colour, not a colour to a number — the printed
@@ -35,70 +54,13 @@ const COLOUR_SCALE = [
 ];
 
 const VOID_OUTBOX_KEY = "aatc-void-outbox";
-const ASSIGN_ALL = "ALL";
 
 // Three roles. The commander runs the mission day; the admin runs the
 // application and holds the urine log as well. Everyone else is crew.
 const COMMAND_ROLES = ["commander", "admin"];
 
-const CREW_CODES = ["FE01", "FE02", "FE03", "FE04", "FE05", "FE06", "FE07"];
-const SESSION_ACCENTS = ["s1", "s2", "s3", "s4"];
-const MAX_DAY = 7;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
-// The commander-selected day lives in the missionDay collection alongside the
-// per-day anchors, under the reserved id "active". Keeping it there means it is
-// covered by the same security rule as the anchors themselves — one rule to
-// deploy, not two, and no collection that a stale rule set has never heard of.
-const ACTIVE_DAY_DOC = "active";
 
-const SESSIONS = [
-  {
-    name: "Session 1",
-    start: 0,
-    end: 4,
-    tests: [
-      ["Sleep", "Sleep", "sleep"],
-      ["Circadian (morning)", "Circadian", "circadian_morning"],
-      ["Bioimpedance (morning)", "Bioimpedance", "bioimpedance_morning"],
-      ["Saturation, Temp, Resp. Rate, BP", "Bioimpedance", "vitals_morning"],
-      ["Chimp (morning)", "Chimp", "chimp_morning"],
-      ["Urine analysis", "Urine", "urine", "Day 1 only"],
-    ],
-  },
-  {
-    name: "Session 2",
-    start: 4,
-    end: 8,
-    tests: [
-      ["Circadian (midday)", "Circadian", "circadian_midday"],
-      ["Hof Protocol", "Hof", "hof"],
-    ],
-  },
-  {
-    name: "Session 3",
-    start: 8,
-    end: 12,
-    tests: [
-      ["Circadian (evening)", "Circadian", "circadian_evening"],
-      ["PR Presentation", "—", "pr_presentation", "Day 7 only"],
-      ["Summary Report", "—", "summary_report", "Day 7 only"],
-    ],
-  },
-  {
-    name: "Session 4",
-    start: 12,
-    end: 24,
-    tests: [
-      ["Circadian (midnight)", "Circadian", "circadian_midnight"],
-      ["Water intake", "Water", "water"],
-      ["Daily Report", "Report", "daily_report"],
-      ["Bioimpedance (evening)", "Bioimpedance", "bioimpedance_evening"],
-      ["Chimp (evening)", "Chimp", "chimp_evening"],
-      ["Space Dragon Test A4", "—", "space_dragon", "Days 4 and 6 only"],
-    ],
-  },
-];
 
 const $ = (id) => document.getElementById(id);
 
@@ -137,62 +99,24 @@ const db = app ? getFirestore(app) : null;
 
 /* ------------------------------------------------------------------ time -- */
 
-function utcString(date = new Date()) {
-  const iso = date.toISOString();
-  return `${iso.slice(0, 10)}  ${iso.slice(11, 19)} UTC`;
-}
-
-function utcTimeOnly(date = new Date()) {
-  return `${date.toISOString().slice(11, 19)} UTC`;
-}
-
-// One mission day is 24 hours long. When the clock passes T+24:00:00 it wraps
-// back to T+00:00:00 and the mission day advances — the commander does not have
-// to be awake at the rollover for the crew to see the right day.
+// The shared module holds the arithmetic; these bind it to this app's state.
 function resolveClock(now = Date.now()) {
-  let baseDay = null;
-
-  if (state.pointerDay !== null && state.anchors.has(state.pointerDay)) {
-    baseDay = state.pointerDay;
-  } else {
-    let latestPast = null;
-    let latestAny = null;
-    state.anchors.forEach((iso, dayNumber) => {
-      const stamp = Date.parse(iso);
-      if (Number.isNaN(stamp)) return;
-      if (latestAny === null || stamp > Date.parse(state.anchors.get(latestAny))) latestAny = dayNumber;
-      if (stamp <= now && (latestPast === null || stamp > Date.parse(state.anchors.get(latestPast)))) {
-        latestPast = dayNumber;
-      }
-    });
-    baseDay = latestPast ?? latestAny;
-  }
-
-  if (baseDay === null) {
-    return { day: state.pointerDay ?? 1, seconds: null, baseDay: null };
-  }
-
-  const elapsed = Math.max(0, now - Date.parse(state.anchors.get(baseDay)));
-  return {
-    day: Math.min(MAX_DAY, baseDay + Math.floor(elapsed / DAY_MS)),
-    seconds: (elapsed % DAY_MS) / 1000,
-    baseDay,
-  };
+  return resolveClockFrom({ anchors: state.anchors, pointerDay: state.pointerDay, now });
 }
 
-function formatMission(seconds) {
-  if (seconds === null) return "T+--:--:--";
-  const total = Math.floor(seconds);
-  const hours = String(Math.floor(total / 3600)).padStart(2, "0");
-  const minutes = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
-  const secs = String(total % 60).padStart(2, "0");
-  return `T+${hours}:${minutes}:${secs}`;
+function sessionItems(sessionIndex) {
+  return sessionItemsFor(sessionIndex, state.day, state.tasks);
 }
 
-function activeSession(seconds) {
-  if (seconds === null) return null;
-  return Math.min(3, Math.floor(seconds / 3600 / 4));
+function doneCodes(item) {
+  return doneCodesFor(item, state.completions, state.day);
 }
+
+
+
+
+
+
 
 /* --------------------------------------------------------------- helpers -- */
 
@@ -206,61 +130,10 @@ function isAdmin() {
   return state.profile?.role === "admin";
 }
 
-function testApplies(test, day) {
-  const key = test[2];
-  if (key === "urine") return day === 1;
-  if (["pr_presentation", "summary_report"].includes(key)) return day === 7;
-  if (key === "space_dragon") return [4, 6].includes(day);
-  return true;
-}
 
-function visibleTests(session, day) {
-  return session.tests.filter((test) => testApplies(test, day));
-}
 
-// The fixed protocol tests and the commander's added tasks render through one
-// shape, so a task behaves like a test everywhere — session list, dashboard and
-// completion id alike — instead of needing a parallel path through each.
-function sessionItems(sessionIndex) {
-  const fixed = visibleTests(SESSIONS[sessionIndex], state.day).map((test) => ({
-    key: test[2],
-    label: test[0],
-    sheet: test[1],
-    note: test[3] ?? null,
-    assignedTo: null,
-    taskId: null,
-  }));
 
-  const added = [...state.tasks.entries()]
-    .filter(([, task]) => Number(task.sessionNumber) === sessionIndex + 1)
-    .sort((a, b) => String(a[1].createdAt).localeCompare(String(b[1].createdAt)))
-    .map(([id, task]) => ({
-      key: id,
-      label: task.title,
-      sheet: null,
-      note: null,
-      assignedTo: task.assignedTo || ASSIGN_ALL,
-      taskId: id,
-    }));
 
-  return [...fixed, ...added];
-}
-
-// Who owes this item. A task assigned to one crew member is that member's alone;
-// everything else is the whole crew's.
-function rosterFor(item) {
-  return item.assignedTo && item.assignedTo !== ASSIGN_ALL ? [item.assignedTo] : CREW_CODES;
-}
-
-function doneCodes(item) {
-  const codes = [];
-  state.completions.forEach((completion) => {
-    if (Number(completion.dayNumber) !== state.day) return;
-    if (completion.testKey !== item.key) return;
-    if (!codes.includes(completion.crewCode)) codes.push(completion.crewCode);
-  });
-  return codes;
-}
 
 function isMine(item) {
   if (!item.assignedTo || item.assignedTo === ASSIGN_ALL) return true;
@@ -273,16 +146,7 @@ function completionId(sessionNumber, testKey, uid) {
 
 // Task titles are free text typed by a human, so they are escaped rather than
 // interpolated raw into the row markup.
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
 
-function escapeAttr(value) {
-  return escapeHtml(value).replace(/"/g, "&quot;");
-}
 
 function describeError(error) {
   if (error?.code === "permission-denied") {

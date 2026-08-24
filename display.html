@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Mission Display — AATC</title>
+<link rel="stylesheet" href="style.css?v=13">
+<link rel="stylesheet" href="display.css?v=13">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#128225;</text></svg>">
+</head>
+<body class="display-body">
+
+<!-- Shown once, on the Pi, at setup. Firebase keeps the session afterwards,
+     so the display comes back on its own after a reboot. -->
+<section id="display-login">
+  <form class="login-card" id="display-login-form" autocomplete="on">
+    <h1>Mission Display</h1>
+    <p class="sub">Read-only wall display &middot; sign in once</p>
+
+    <div class="field">
+      <label for="display-email">Display account email</label>
+      <input type="email" id="display-email" autocomplete="username" required>
+    </div>
+
+    <div class="field">
+      <label for="display-password">Password</label>
+      <input type="password" id="display-password" autocomplete="current-password" required>
+    </div>
+
+    <button type="submit" class="btn btn-primary" id="display-login-btn">Sign in</button>
+    <p class="error" id="display-login-error" role="alert"></p>
+    <p class="sub" style="margin-top:18px">
+      Use the dedicated display account, never a crew member's.
+      This page shows the mission clock, the session battery and the crew
+      dashboard, and can write nothing.
+    </p>
+  </form>
+</section>
+
+<main id="display-main" class="hidden">
+
+  <header class="wall-head">
+    <div class="wall-clock">
+      <div class="wall-label">Mission time</div>
+      <div class="wall-mission" id="wall-mission">T+--:--:--</div>
+      <div class="wall-utc" id="wall-utc">&mdash;</div>
+    </div>
+    <div class="wall-day">
+      <div class="wall-day-number" id="wall-day">Mission Day &mdash;</div>
+      <div class="dots" id="wall-dots"></div>
+      <div class="wall-session" id="wall-session">Mission day not started</div>
+      <div class="wall-window" id="wall-window">&mdash;</div>
+    </div>
+  </header>
+
+  <section class="wall-grid">
+    <section class="wall-panel">
+      <h2 id="wall-current-title">Due now</h2>
+      <div id="wall-current"></div>
+    </section>
+
+    <section class="wall-panel">
+      <h2>Next up</h2>
+      <div id="wall-next"></div>
+    </section>
+  </section>
+
+  <section class="wall-panel wall-dashboard">
+    <h2>Crew dashboard <span class="wall-sub" id="wall-dash-summary"></span></h2>
+    <div class="dash-scroll">
+      <table class="dash" id="wall-dash">
+        <thead>
+          <tr><th>Test</th><th>Done</th><th>Pending</th><th></th></tr>
+        </thead>
+        <tbody id="wall-dash-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="wall-foot">
+    <span id="wall-status">connecting&hellip;</span>
+    <span class="wall-sub">Read-only display</span>
+  </footer>
+</main>
+
+<script type="module" src="display.js?v=13"></script>
+</body>
+</html>

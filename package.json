@@ -1,4 +1,5 @@
 {
+  "scripts": { "test": "node tests/mission.test.mjs" },
   "dependencies": {
     "firebase-admin": "^14.3.0"
   }

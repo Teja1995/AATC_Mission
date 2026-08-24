@@ -550,6 +550,29 @@ Firestore rules: anyone signed in reads `/tasks`; only a commander writes. The
 assignee rule is enforced in the UI, on the same footing as every other test —
 the rules stop a crew member writing a completion under anyone else's uid.
 
+## Wall display
+
+`display.html` is a second page for a Raspberry Pi driving a screen in the
+habitat. It shows the mission clock, the mission day, the session due now, what
+is next, and the crew dashboard -- and nothing else. No Mission Control, no
+added-task controls, no urine log, no Log Urine button.
+
+It signs in as a dedicated account whose `users/{uid}` document carries
+`role: "display"` and `crewCode: "DISPLAY"`. The rules give that role read
+access to `missionDay`, `tasks` and `completions`, and refuse it every write:
+`filedBySelf()` and the urine-log update rule both exclude it. A screen left
+unattended in a shared space cannot mark a test done or file a measurement, and
+`DISPLAY` never appears on the dashboard as somebody who owes anything.
+
+The Pi must never be signed in as a crew member -- that would put one person's
+private urine log and every admin control on a wall.
+
+`mission.js` holds the battery, the session windows, the clock arithmetic and
+the item model, and both pages import it. The display cannot drift from the app
+about what is due or what day it is. `tests/mission.test.mjs` checks that module
+directly: the 24-hour rollover, the day-conditional tests, and how added tasks
+merge into a session.
+
 ## Out of scope (do not build)
 
 - Self-registration
