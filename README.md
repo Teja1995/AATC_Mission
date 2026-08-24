@@ -34,16 +34,16 @@ Also check that the account really is a commander: `users/{uid}.role` must read 
 
 `firestore.rules` allows only commanders to delete completion documents, which is required by the in-app Reset day action. Astronauts can create only their own completion documents and cannot update or delete them.
 
-## Urine volume logging ("Log Void")
+## Urine volume logging ("Log Urine")
 
-A floating **Log Void** button sits on every screen once logged in. It asks for two
+A floating **Log Urine** button sits on every screen once logged in. It asks for two
 things only — volume in millilitres, and the Armstrong colour, chosen by tapping one
 of eight swatches printed in the actual scale colours rather than typing a number.
 Crew code, mission day, mission time and UTC are filled in from the live session and
 shown above the form so the astronaut can see what is being recorded.
 
-Entries are stored in Firestore under `/voids`, and **FE07 (admin) sees a Void log
-panel with "Download void log (CSV)"** — one UTF-8 file, all seven days, columns
+Entries are stored in Firestore under `/voids`, and **FE07 (admin) sees a Urine log
+panel with "Download urine log (CSV)"** — one UTF-8 file, all seven days, columns
 `Crew Code, Mission Day, Mission Time, UTC Date & Time, Volume (mL), Colour (1-8)`,
 sorted by crew code then time. Nobody else can read the collection back; a crew
 member can only add their own entries. Nothing is ever updated or deleted.
@@ -55,7 +55,7 @@ lost response overwrites the same document rather than adding a second row.
 
 A void cannot be measured twice, so an entry is written to the device before the
 network is touched and stays there until Firestore confirms it. The count of
-unsent entries rides on the Log Void button; queued entries retry every minute,
+unsent entries rides on the Log Urine button; queued entries retry every minute,
 when the browser comes back online, and on the next submit.
 
 ## Commander-added tasks

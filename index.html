@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Mission Data Tracker — AATC</title>
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#128752;</text></svg>">
 </head>
 <body>
@@ -161,16 +161,16 @@
       </div>
     </section>
 
-    <!-- Admin only (FE07): the void log leaves the app here -->
+    <!-- Admin only (FE07): the urine log leaves the app here -->
     <section class="card hidden" id="data-officer-panel">
       <div class="panel-head">
-        <h2 style="color:var(--teal)">Void log</h2>
+        <h2 style="color:var(--teal)">Urine log</h2>
         <span class="hint" id="voids-hint">Health data &mdash; admin only</span>
       </div>
       <div class="panel-body">
         <div class="row">
-          <button class="btn" id="export-voids-btn" type="button">Download void log (CSV)</button>
-          <span class="hint">Every void logged by the crew, all seven days, one file.</span>
+          <button class="btn" id="export-voids-btn" type="button">Download urine log (CSV)</button>
+          <span class="hint">Every entry logged by the crew, all seven days, one file.</span>
         </div>
       </div>
     </section>
@@ -216,14 +216,14 @@
 
   <!-- Reachable from any screen, at any mission time. -->
   <button class="fab" id="log-void-btn" type="button">
-    <span class="fab-icon" aria-hidden="true">+</span> Log Void
+    <span class="fab-icon" aria-hidden="true">+</span> Log Urine
     <span class="fab-pending hidden" id="void-pending" title="Entries waiting to be sent">0</span>
   </button>
 
   <div class="modal-backdrop hidden" id="void-modal" role="dialog" aria-modal="true" aria-labelledby="void-title">
     <form class="modal" id="void-form">
       <div class="modal-head">
-        <h2 id="void-title">Log Void</h2>
+        <h2 id="void-title">Log Urine</h2>
         <button class="btn btn-small" id="void-close" type="button" aria-label="Close">Cancel</button>
       </div>
 
@@ -252,6 +252,6 @@
   </div>
 </div>
 
-<script type="module" src="app.js?v=10"></script>
+<script type="module" src="app.js?v=11"></script>
 </body>
 </html>

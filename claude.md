@@ -574,7 +574,7 @@ serve anonymous callers. Firestore already carries every other piece of mission
 state, so the void log goes there too and leaves as a CSV at the end.)*
 
 ### What the astronaut sees
-A "Log Void" button fixed to every screen, available at any mission time. It
+A "Log Urine" button fixed to every screen, available at any mission time. It
 opens a form with exactly two inputs:
 
 - **Volume (mL)** -- a number.
@@ -595,6 +595,11 @@ what is being filed.
 
 ### Storage
 
+The collection is `/voids` and the device queue key is `aatc-void-outbox`. Those
+names stay as they are: renaming the collection would orphan entries already
+filed, and renaming the queue key would strand any entry sitting unsent on a
+crew member's phone. The wording changed on screen only, where it matters.
+
 ```
 /voids/{crewCode}_{utcDateTime}      // colons and dots replaced with hyphens
   uid: string
@@ -614,12 +619,12 @@ A void cannot be duplicated.
 
 A void cannot be measured twice. Each entry is written to the device before
 Firestore is touched and stays there until the write is confirmed. The count of
-unsent entries shows on the Log Void button; the queue is retried every minute,
+unsent entries shows on the Log Urine button; the queue is retried every minute,
 when the browser comes back online, and on the next submit.
 
 ### Export
 
-FE07 (admin) sees a **Void log** panel with **Download void log (CSV)**. It
+FE07 (admin) sees a **Urine log** panel with **Download urine log (CSV)**. It
 reads the whole collection and writes one UTF-8 file:
 
 | A | B | C | D | E | F |

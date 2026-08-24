@@ -17,7 +17,7 @@ import {
   setDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=10";
+import { firebaseConfig } from "./firebase-config.js?v=11";
 
 // Armstrong urine colour scale. The swatches on screen carry these colours so
 // the crew matches a colour to a colour, not a colour to a number — the printed
@@ -37,7 +37,7 @@ const VOID_OUTBOX_KEY = "aatc-void-outbox";
 const ASSIGN_ALL = "ALL";
 
 // Three roles. The commander runs the mission day; the admin runs the
-// application and holds the void log as well. Everyone else is crew.
+// application and holds the urine log as well. Everyone else is crew.
 const COMMAND_ROLES = ["commander", "admin"];
 
 const CREW_CODES = ["FE01", "FE02", "FE03", "FE04", "FE05", "FE06", "FE07"];
@@ -119,7 +119,7 @@ const state = {
   pulseSession: null,
   selectedSession: null,
   renderKey: "",
-  voidColour: null,          // Armstrong score selected in the Log Void form
+  voidColour: null,          // Armstrong score selected in the Log Urine form
 };
 
 const configured = !Object.values(firebaseConfig).some(
@@ -193,7 +193,7 @@ function activeSession(seconds) {
 /* --------------------------------------------------------------- helpers -- */
 
 // FE04 commands the mission, FE07 administers the app. Both drive Mission
-// Control; only the admin can read the void log back.
+// Control; only the admin can read the urine log back.
 function canCommand() {
   return COMMAND_ROLES.includes(state.profile?.role);
 }
@@ -839,7 +839,7 @@ async function flushOutbox({ announce = false } = {}) {
         await postEntry(entries[0]);
       } catch (error) {
         if (announce || sent) {
-          showToast(`${entries.length} void ${entries.length === 1 ? "entry is" : "entries are"} waiting to be sent: ${error.message}`, true);
+          showToast(`${entries.length} urine ${entries.length === 1 ? "entry is" : "entries are"} waiting to be sent: ${error.message}`, true);
         }
         break;
       }
@@ -851,8 +851,8 @@ async function flushOutbox({ announce = false } = {}) {
     flushing = false;
   }
 
-  if (sent && announce) showToast(sent === 1 ? "Void logged." : `${sent} void entries saved.`);
-  else if (sent) showToast(`${sent} queued void ${sent === 1 ? "entry" : "entries"} sent.`);
+  if (sent && announce) showToast(sent === 1 ? "Urine entry logged." : `${sent} urine entries logged.`);
+  else if (sent) showToast(`${sent} queued urine ${sent === 1 ? "entry" : "entries"} sent.`);
 }
 
 // The columns the protocol asks for, in that order.
@@ -881,7 +881,7 @@ async function exportVoidsCsv() {
         || String(a.utcDateTime).localeCompare(String(b.utcDateTime)));
 
     if (!rows.length) {
-      showToast("No voids logged yet.", true);
+      showToast("No urine entries logged yet.", true);
       return;
     }
 
@@ -894,13 +894,13 @@ async function exportVoidsCsv() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `aatc_void_log_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `aatc_urine_log_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.append(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
 
-    showToast(`Exported ${rows.length} void ${rows.length === 1 ? "entry" : "entries"}.`);
+    showToast(`Exported ${rows.length} ${rows.length === 1 ? "entry" : "entries"}.`);
   } catch (error) {
     showToast(`Could not export: ${describeError(error)}`, true);
   } finally {
