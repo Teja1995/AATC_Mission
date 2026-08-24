@@ -15,12 +15,9 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Holds the per-day anchors under ids "1".."7", plus the commander-selected
+    // active day under the reserved id "active".
     match /missionDay/{day} {
-      allow read: if signedIn();
-      allow write: if isCommander();
-    }
-
-    match /missionControl/{setting} {
       allow read: if signedIn();
       allow write: if isCommander();
     }

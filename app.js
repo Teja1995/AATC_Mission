@@ -10,16 +10,25 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getFirestore,
   onSnapshot,
   query,
   setDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=2";
+import { firebaseConfig } from "./firebase-config.js?v=4";
 
 const CREW_CODES = ["FE01", "FE02", "FE03", "FE04", "FE05", "FE06", "FE07"];
 const SESSION_ACCENTS = ["s1", "s2", "s3", "s4"];
+const MAX_DAY = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// The commander-selected day lives in the missionDay collection alongside the
+// per-day anchors, under the reserved id "active". Keeping it there means it is
+// covered by the same security rule as the anchors themselves — one rule to
+// deploy, not two, and no collection that a stale rule set has never heard of.
+const ACTIVE_DAY_DOC = "active";
+
 const SESSIONS = [
   {
     name: "Session 1",
@@ -72,50 +81,94 @@ const SESSIONS = [
 ];
 
 const $ = (id) => document.getElementById(id);
+
 const state = {
   user: null,
   profile: null,
-  day: 1,
-  missionDay: null,
+  anchors: new Map(),        // dayNumber -> UTC ISO string, from missionDay/{1..7}
+  pointerDay: null,          // commander-selected day, from missionDay/active
+  day: 1,                    // derived: pointer day plus whole elapsed mission days
+  baseDay: null,             // the day whose anchor the clock is counting from
+  completionsDay: null,      // the day the completions listener is bound to
   completions: new Map(),
+  completionsVersion: 0,
   unsubscribers: [],
-  dayUnsubscribers: [],
+  completionsUnsubscribe: null,
   previousSession: null,
   pulseSession: null,
   selectedSession: null,
+  renderKey: "",
 };
 
-const configured = !Object.values(firebaseConfig).some((value) => value.startsWith("PASTE_"));
+const configured = !Object.values(firebaseConfig).some(
+  (value) => typeof value === "string" && value.startsWith("PASTE_"),
+);
 if (!configured) $("setup-banner").classList.remove("hidden");
 
 const app = configured ? initializeApp(firebaseConfig) : null;
 const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 
+/* ------------------------------------------------------------------ time -- */
+
 function utcString(date = new Date()) {
-  return date.toISOString().replace("T", "  ").replace(".000Z", " UTC").replace("Z", " UTC");
+  const iso = date.toISOString();
+  return `${iso.slice(0, 10)}  ${iso.slice(11, 19)} UTC`;
 }
 
-function missionSeconds() {
-  if (!state.missionDay?.wakeUpTime) return null;
-  const anchor = new Date(state.missionDay.wakeUpTime).getTime();
-  return Math.max(0, (Date.now() - anchor) / 1000);
+function utcTimeOnly(date = new Date()) {
+  return `${date.toISOString().slice(11, 19)} UTC`;
+}
+
+// One mission day is 24 hours long. When the clock passes T+24:00:00 it wraps
+// back to T+00:00:00 and the mission day advances — the commander does not have
+// to be awake at the rollover for the crew to see the right day.
+function resolveClock(now = Date.now()) {
+  let baseDay = null;
+
+  if (state.pointerDay !== null && state.anchors.has(state.pointerDay)) {
+    baseDay = state.pointerDay;
+  } else {
+    let latestPast = null;
+    let latestAny = null;
+    state.anchors.forEach((iso, dayNumber) => {
+      const stamp = Date.parse(iso);
+      if (Number.isNaN(stamp)) return;
+      if (latestAny === null || stamp > Date.parse(state.anchors.get(latestAny))) latestAny = dayNumber;
+      if (stamp <= now && (latestPast === null || stamp > Date.parse(state.anchors.get(latestPast)))) {
+        latestPast = dayNumber;
+      }
+    });
+    baseDay = latestPast ?? latestAny;
+  }
+
+  if (baseDay === null) {
+    return { day: state.pointerDay ?? 1, seconds: null, baseDay: null };
+  }
+
+  const elapsed = Math.max(0, now - Date.parse(state.anchors.get(baseDay)));
+  return {
+    day: Math.min(MAX_DAY, baseDay + Math.floor(elapsed / DAY_MS)),
+    seconds: (elapsed % DAY_MS) / 1000,
+    baseDay,
+  };
 }
 
 function formatMission(seconds) {
   if (seconds === null) return "T+--:--:--";
   const total = Math.floor(seconds);
   const hours = String(Math.floor(total / 3600)).padStart(2, "0");
-  const minutes = String(Math.floor(total % 3600 / 60)).padStart(2, "0");
+  const minutes = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
   const secs = String(total % 60).padStart(2, "0");
   return `T+${hours}:${minutes}:${secs}`;
 }
 
 function activeSession(seconds) {
   if (seconds === null) return null;
-  const hours = seconds / 3600;
-  return Math.min(3, Math.floor(hours / 4));
+  return Math.min(3, Math.floor(seconds / 3600 / 4));
 }
+
+/* --------------------------------------------------------------- helpers -- */
 
 function testApplies(test, day) {
   const key = test[2];
@@ -134,37 +187,67 @@ function completionId(sessionNumber, testKey, uid) {
   return `${state.day}_${sessionNumber}_${testKey}_${uid}`;
 }
 
+function describeError(error) {
+  if (error?.code === "permission-denied") {
+    return "Firestore rejected the write. Publish firestore.rules from this repo in the Firebase console (Firestore → Rules → Publish), then reload.";
+  }
+  return error?.message ?? String(error);
+}
+
+function showToast(message, error = false) {
+  let toast = $("toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "toast";
+    document.body.append(toast);
+  }
+  toast.textContent = message;
+  toast.classList.toggle("err", error);
+  window.clearTimeout(toast.dataset.timer);
+  toast.dataset.timer = window.setTimeout(() => toast.remove(), 6000);
+}
+
+/* --------------------------------------------------------------- render -- */
+
 function renderDots() {
-  $("day-dots").innerHTML = Array.from({ length: 7 }, (_, index) =>
+  $("day-dots").innerHTML = Array.from({ length: MAX_DAY }, (_, index) =>
     `<span class="dot ${index + 1 <= state.day ? "filled" : ""}" aria-label="Day ${index + 1}"></span>`,
   ).join("");
 }
 
-function renderSessions() {
+function renderSessions(current) {
   if (!state.user) return;
-  const current = activeSession(missionSeconds());
   const selected = state.selectedSession === null ? (current ?? 0) : state.selectedSession;
+
   $("day-label").textContent = `Mission Day ${state.day}`;
-  $("session-line").textContent = current === null ? "Mission day not started" : `Session ${current + 1} active`;
+  $("session-line").textContent = current === null
+    ? "Mission day not started"
+    : `Session ${current + 1} active`;
   renderDots();
 
   $("session-nav").innerHTML = SESSIONS.map((session, index) => {
-    const label = current === index ? "Active" : current !== null && index < current ? "Past" : "Upcoming";
+    const label = current === index
+      ? "Active"
+      : current !== null && index < current ? "Past" : "Upcoming";
     return `<button class="session-nav-item ${index === selected ? "selected" : ""} ${index === current ? "active" : ""}" type="button" data-session-select="${index}">
       <span>${session.name}</span><small>${label}</small>
     </button>`;
   }).join("");
+
   document.querySelectorAll("[data-session-select]").forEach((button) => {
     button.addEventListener("click", () => {
       state.selectedSession = Number(button.dataset.sessionSelect);
-      renderSessions();
+      paint(true);
     });
   });
 
   const session = SESSIONS[selected];
   const tests = visibleTests(session, state.day);
-  const status = current === null ? "upcoming" : selected === current ? "active" : selected < current ? "past" : "upcoming";
-  const windowEnd = session.end === 24 ? "T+24:00:00" : `T+${String(session.end).padStart(2, "0")}:00:00`;
+  const status = current === null
+    ? "upcoming"
+    : selected === current ? "active" : selected < current ? "past" : "upcoming";
+  const windowEnd = `T+${String(session.end).padStart(2, "0")}:00:00`;
+
   $("sessions-view").innerHTML = `<section class="session ${SESSION_ACCENTS[selected]} ${status}">
       <div class="session-head ${selected === state.pulseSession ? "pulse" : ""}">
         <span class="name">${session.name}</span>
@@ -186,7 +269,9 @@ function renderTest(test, sessionNumber) {
     <span class="mark">${completion ? "✓" : ""}</span>
     <span class="label">${test[0]}${test[3] ? `<span class="only">${test[3]}</span>` : ""}</span>
     <span class="sheet">Sheet: ${test[1]}</span>
-    ${completion ? `<span class="done-stamp">done</span>` : `<button class="btn-mark" type="button" data-complete="1" data-session="${sessionNumber}" data-test="${test[2]}">Mark done</button>`}
+    ${completion
+      ? `<span class="done-stamp">done</span>`
+      : `<button class="btn-mark" type="button" data-complete="1" data-session="${sessionNumber}" data-test="${test[2]}">Mark done</button>`}
   </div>`;
 }
 
@@ -196,44 +281,72 @@ function renderDashboard() {
     if (!doneByKey.has(completion.testKey)) doneByKey.set(completion.testKey, []);
     doneByKey.get(completion.testKey).push(completion.crewCode);
   });
+
   let rows = "";
   SESSIONS.forEach((session, index) => {
     const tests = visibleTests(session, state.day);
+    if (!tests.length) return;
     rows += `<tr class="sess-row ${SESSION_ACCENTS[index]}"><td colspan="4">${session.name}</td></tr>`;
     tests.forEach((test) => {
       const done = doneByKey.get(test[2]) || [];
       const pending = CREW_CODES.filter((code) => !done.includes(code));
-      rows += `<tr><td>${test[0]}</td><td><div class="codes">${done.length ? done.map((code) => `<span class="yes">${code}</span>`).join("") : '<span class="none">—</span>'}</div></td><td><div class="codes">${pending.map((code) => `<span class="no">${code}</span>`).join("")}</div></td><td class="count">${done.length}/${CREW_CODES.length}</td></tr>`;
+      rows += `<tr><td>${test[0]}</td>`
+        + `<td><div class="codes">${done.length ? done.map((code) => `<span class="yes">${code}</span>`).join("") : '<span class="none">—</span>'}</div></td>`
+        + `<td><div class="codes">${pending.length ? pending.map((code) => `<span class="no">${code}</span>`).join("") : '<span class="none">—</span>'}</div></td>`
+        + `<td class="count">${done.length}/${CREW_CODES.length}</td></tr>`;
     });
   });
+
   $("dash-day").textContent = state.day;
   $("dash-summary").textContent = `${state.completions.size} completions`;
   $("dash-body").innerHTML = rows;
 }
 
-function renderClocks() {
-  const seconds = missionSeconds();
-  const current = activeSession(seconds);
+// Runs once a second. Clocks are cheap to repaint; the session list is not, and
+// rebuilding it every tick would steal focus from a button mid-press — so it is
+// only rebuilt when something it depends on has actually changed.
+function paint(force = false) {
+  const clock = resolveClock();
+  const current = activeSession(clock.seconds);
+
+  if (clock.day !== state.day) {
+    state.day = clock.day;
+    state.selectedSession = null;
+    state.previousSession = null;
+    syncDaySelect();
+    subscribeCompletions();
+  }
+  state.baseDay = clock.baseDay;
+
   $("utc-clock").textContent = utcString();
   $("cmd-utc").textContent = utcString();
-  $("mission-clock").textContent = formatMission(seconds);
-  $("mission-clock").classList.toggle("unset", seconds === null);
-  $("display-mission-clock").textContent = formatMission(seconds);
+  $("mission-clock").textContent = formatMission(clock.seconds);
+  $("mission-clock").classList.toggle("unset", clock.seconds === null);
+  $("display-mission-clock").textContent = formatMission(clock.seconds);
   $("display-day").textContent = `Mission Day ${state.day}`;
-  $("display-session").textContent = current === null ? "Mission day not started" : `Session ${current + 1} active`;
+  $("display-session").textContent = current === null
+    ? "Mission day not started"
+    : `Session ${current + 1} active`;
   $("display-session-detail").textContent = current === null
     ? "Waiting for Commander to start the mission day."
     : `${SESSIONS[current].name} · ${visibleTests(SESSIONS[current], state.day).map((test) => test[0]).join(" · ")}`;
+
   if (current !== null && current !== state.previousSession) {
     state.pulseSession = current;
     playSessionChime(current);
     window.setTimeout(() => {
       state.pulseSession = null;
-      renderSessions();
-    }, 1200);
+      paint(true);
+    }, 1300);
   }
   state.previousSession = current;
-  renderSessions();
+
+  const key = `${state.day}|${current}|${state.selectedSession}|${state.pulseSession}|${state.completionsVersion}`;
+  if (force || key !== state.renderKey) {
+    state.renderKey = key;
+    renderSessions(current);
+    renderDashboard();
+  }
 }
 
 function playSessionChime(sessionIndex) {
@@ -251,7 +364,16 @@ function playSessionChime(sessionIndex) {
     oscillator.start();
     oscillator.stop(audioContext.currentTime + 0.2);
     oscillator.addEventListener("ended", () => audioContext.close(), { once: true });
-  } catch { }
+  } catch (error) {
+    // No audio device, or the browser has not granted an audio context yet.
+    // The visual highlight still fires; a missing beep must not stop the app.
+  }
+}
+
+/* --------------------------------------------------------- commander ops -- */
+
+function syncDaySelect() {
+  if (state.profile?.role === "commander") $("day-select").value = String(state.day);
 }
 
 function updateAnchorPreview() {
@@ -262,19 +384,93 @@ function updateAnchorPreview() {
   $("anchor-preview").textContent = utcString(new Date(Date.now() - entered));
 }
 
-function showToast(message, error = false) {
-  let toast = $("toast");
-  if (!toast) {
-    toast = document.createElement("div");
-    toast.id = "toast";
-    document.body.append(toast);
+function updateLastSaved() {
+  const dayNumber = state.baseDay ?? state.day;
+  const anchor = state.anchors.get(dayNumber);
+  $("last-saved").textContent = anchor
+    ? `Day ${dayNumber} anchor = ${utcString(new Date(anchor))}`
+    : "Not set";
+}
+
+async function writeActiveDay(dayNumber) {
+  await setDoc(doc(db, "missionDay", ACTIVE_DAY_DOC), {
+    dayNumber,
+    setBy: state.user.uid,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function setActiveDay() {
+  const dayNumber = Number($("day-select").value);
+  const hasAnchor = state.anchors.has(dayNumber);
+  const startNow = !hasAnchor
+    && window.confirm(`Day ${dayNumber} has no start time yet.\n\nStart it now at T+00:00:00?`);
+  try {
+    if (startNow) {
+      await setDoc(doc(db, "missionDay", String(dayNumber)), {
+        wakeUpTime: new Date().toISOString(),
+        setBy: state.user.uid,
+      });
+    }
+    await writeActiveDay(dayNumber);
+    showToast(startNow
+      ? `Mission Day ${dayNumber} started at T+00:00:00.`
+      : `Mission Day ${dayNumber} is now active.`);
+  } catch (error) {
+    showToast(`Could not set active day: ${describeError(error)}`, true);
   }
-  toast.textContent = message;
-  toast.classList.toggle("err", error);
-  window.setTimeout(() => toast.remove(), 4000);
+}
+
+async function setMissionTime(reset = false) {
+  const dayNumber = Number($("day-select").value);
+  let entered = 0;
+
+  if (!reset) {
+    const hours = Number($("in-hh").value);
+    const minutes = Number($("in-mm").value);
+    const seconds = Number($("in-ss").value);
+    const valid = Number.isInteger(hours) && hours >= 0 && hours < 24
+      && Number.isInteger(minutes) && minutes >= 0 && minutes < 60
+      && Number.isInteger(seconds) && seconds >= 0 && seconds < 60;
+    if (!valid) {
+      showToast("Enter a mission time between T+00:00:00 and T+23:59:59.", true);
+      return;
+    }
+    entered = (hours * 3600 + minutes * 60 + seconds) * 1000;
+  }
+
+  try {
+    await setDoc(doc(db, "missionDay", String(dayNumber)), {
+      wakeUpTime: new Date(Date.now() - entered).toISOString(),
+      setBy: state.user.uid,
+    });
+    // Setting a day's mission time is also a statement that this is the day the
+    // crew is on. Without this, the anchor moves but everyone stays on the old day.
+    await writeActiveDay(dayNumber);
+    showToast(reset
+      ? `Day ${dayNumber} reset to T+00:00:00.`
+      : `Day ${dayNumber} mission time saved.`);
+  } catch (error) {
+    showToast(`Could not save mission time: ${describeError(error)}`, true);
+  }
+}
+
+async function resetDay() {
+  if (!window.confirm(`Clear all completions for Mission Day ${state.day}? This cannot be undone.`)) return;
+  const ids = [...state.completions.keys()];
+  try {
+    await Promise.all(ids.map((id) => deleteDoc(doc(db, "completions", id))));
+    showToast(`Cleared ${ids.length} completions.`);
+  } catch (error) {
+    showToast(`Could not reset day: ${describeError(error)}`, true);
+  }
 }
 
 async function markDone(sessionNumber, testKey) {
+  if (state.baseDay === null) {
+    showToast("No mission day has been started yet. Ask the Commander to start the day.", true);
+    return;
+  }
   const id = completionId(sessionNumber, testKey, state.user.uid);
   try {
     await setDoc(doc(db, "completions", id), {
@@ -287,107 +483,71 @@ async function markDone(sessionNumber, testKey) {
       testKey,
     });
   } catch (error) {
-    showToast(`Could not mark test done: ${error.message}`, true);
+    showToast(`Could not mark test done: ${describeError(error)}`, true);
   }
 }
+
+/* ---------------------------------------------------------- subscriptions -- */
 
 function clearSubscriptions() {
   state.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
-  state.dayUnsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
+  if (state.completionsUnsubscribe) {
+    state.completionsUnsubscribe();
+    state.completionsUnsubscribe = null;
+  }
+  state.completionsDay = null;
+  state.anchors = new Map();
+  state.completions = new Map();
 }
 
-function subscribeToDay() {
-  state.dayUnsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
-  const dayRef = doc(db, "missionDay", String(state.day));
-  state.dayUnsubscribers.push(onSnapshot(dayRef, (snapshot) => {
-    state.missionDay = snapshot.exists() ? snapshot.data() : null;
-    const saved = state.missionDay?.wakeUpTime;
-    $("last-saved").textContent = saved ? `Day ${state.day} anchor = ${utcString(new Date(saved))}` : "Not set";
-    renderClocks();
-  }, (error) => showToast(`Mission day unavailable: ${error.message}`, true)));
+// One listener covers every anchor plus the active-day pointer, so a rollover
+// onto a day whose anchor was set days ago needs no extra read.
+function subscribeMissionDays() {
+  state.unsubscribers.push(onSnapshot(collection(db, "missionDay"), (snapshot) => {
+    const anchors = new Map();
+    let pointerDay = null;
+    snapshot.forEach((item) => {
+      if (item.id === ACTIVE_DAY_DOC) {
+        const dayNumber = Number(item.data().dayNumber);
+        if (Number.isInteger(dayNumber) && dayNumber >= 1 && dayNumber <= MAX_DAY) pointerDay = dayNumber;
+        return;
+      }
+      const dayNumber = Number(item.id);
+      const wakeUpTime = item.data().wakeUpTime;
+      if (!Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > MAX_DAY) return;
+      if (typeof wakeUpTime === "string") anchors.set(dayNumber, wakeUpTime);
+      else if (wakeUpTime?.toDate) anchors.set(dayNumber, wakeUpTime.toDate().toISOString());
+    });
+    state.anchors = anchors;
+    state.pointerDay = pointerDay;
+    updateLastSaved();
+    paint(true);
+    subscribeCompletions();
+  }, (error) => showToast(`Mission day unavailable: ${describeError(error)}`, true)));
+}
+
+function subscribeCompletions() {
+  if (state.completionsDay === state.day) return;
+  if (state.completionsUnsubscribe) state.completionsUnsubscribe();
+  state.completionsDay = state.day;
 
   const completionsQuery = query(collection(db, "completions"), where("dayNumber", "==", state.day));
-  state.dayUnsubscribers.push(onSnapshot(completionsQuery, (snapshot) => {
+  state.completionsUnsubscribe = onSnapshot(completionsQuery, (snapshot) => {
     state.completions = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
-    renderSessions();
-    renderDashboard();
-  }, (error) => showToast(`Dashboard unavailable: ${error.message}`, true)));
+    state.completionsVersion += 1;
+    paint(true);
+  }, (error) => showToast(`Dashboard unavailable: ${describeError(error)}`, true));
 }
 
-function subscribeToActiveDay() {
-  const activeDayRef = doc(db, "missionControl", "current");
-  state.unsubscribers.push(onSnapshot(activeDayRef, (snapshot) => {
-    if (!snapshot.exists()) return;
-    const activeDay = Number(snapshot.data().dayNumber);
-    if (!Number.isInteger(activeDay) || activeDay < 1 || activeDay > 7 || activeDay === state.day) return;
-    state.day = activeDay;
-    state.selectedSession = null;
-    $("day-select").value = String(activeDay);
-    state.previousSession = null;
-    state.pulseSession = null;
-    subscribeToDay();
-    renderDashboard();
-  }, (error) => showToast(`Active mission day unavailable: ${error.message}`, true)));
-}
-
-async function setActiveDay() {
-  const dayNumber = Number($("day-select").value);
-  try {
-    await setDoc(doc(db, "missionControl", "current"), {
-      dayNumber,
-      setBy: state.user.uid,
-      updatedAt: new Date().toISOString(),
-    });
-    state.day = dayNumber;
-    state.selectedSession = null;
-    state.previousSession = null;
-    state.pulseSession = null;
-    subscribeToDay();
-    renderDashboard();
-    showToast(`Mission Day ${dayNumber} is now active.`);
-  } catch (error) {
-    showToast(`Could not set active day: ${error.message}`, true);
-  }
-}
-
-async function setMissionTime(reset = false) {
-  let entered = 0;
-  if (!reset) {
-    const hours = Number($("in-hh").value);
-    const minutes = Number($("in-mm").value);
-    const seconds = Number($("in-ss").value);
-    if (!Number.isInteger(hours) || hours < 0 || !Number.isInteger(minutes) || minutes < 0 || minutes > 59 || !Number.isInteger(seconds) || seconds < 0 || seconds > 59) {
-      showToast("Enter a valid mission time.", true);
-      return;
-    }
-    entered = (hours * 3600 + minutes * 60 + seconds) * 1000;
-  }
-  try {
-    const now = new Date();
-    await setDoc(doc(db, "missionDay", String(state.day)), {
-      wakeUpTime: new Date(now.getTime() - entered).toISOString(),
-      setBy: state.user.uid,
-    });
-    showToast(reset ? "Mission time reset to T+00:00:00." : "Mission time saved.");
-  } catch (error) {
-    showToast(`Could not save mission time: ${error.message}`, true);
-  }
-}
-
-async function resetDay() {
-  if (!window.confirm(`Clear all completions for Mission Day ${state.day}? This cannot be undone.`)) return;
-  const ids = [...state.completions.keys()];
-  try {
-    await Promise.all(ids.map((id) => deleteDoc(doc(db, "completions", id))));
-    showToast(`Cleared ${ids.length} completions.`);
-  } catch (error) {
-    showToast(`Could not reset day: ${error.message}`, true);
-  }
-}
+/* ------------------------------------------------------------------- ui -- */
 
 function configureUi() {
   $("login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!auth) {
+      $("login-error").textContent = "Firebase is not configured yet.";
+      return;
+    }
     $("login-btn").disabled = true;
     $("login-error").textContent = "";
     try {
@@ -398,6 +558,7 @@ function configureUi() {
       $("login-btn").disabled = false;
     }
   });
+
   $("logout-btn").addEventListener("click", () => signOut(auth));
   $("set-day-btn").addEventListener("click", setActiveDay);
   [$("in-hh"), $("in-mm"), $("in-ss")].forEach((input) => input.addEventListener("input", updateAnchorPreview));
@@ -411,6 +572,7 @@ function configureUi() {
 
 function switchTab(tab) {
   const sessions = tab === "sessions";
+  $("session-nav").classList.toggle("hidden", !sessions);
   $("sessions-view").classList.toggle("hidden", !sessions);
   $("dashboard-view").classList.toggle("hidden", sessions);
   $("tab-sessions").classList.toggle("active", sessions);
@@ -423,12 +585,14 @@ function enterApp() {
   $("crew-chip").textContent = state.profile.crewCode;
   $("crew-chip").classList.toggle("commander", state.profile.role === "commander");
   $("commander-panel").classList.toggle("hidden", state.profile.role !== "commander");
-  subscribeToActiveDay();
-  subscribeToDay();
-  renderDashboard();
+  syncDaySelect();
+  subscribeMissionDays();
+  subscribeCompletions();
+  paint(true);
 }
 
 configureUi();
+
 if (auth) {
   onAuthStateChanged(auth, async (user) => {
     if (!user) {
@@ -441,14 +605,17 @@ if (auth) {
     }
     try {
       const profileSnapshot = await getDoc(doc(db, "users", user.uid));
-      if (!profileSnapshot.exists()) throw new Error("User profile is missing.");
+      if (!profileSnapshot.exists()) {
+        throw new Error("No crew profile for this account. Ask the Data Officer to run the seed script.");
+      }
       state.user = user;
       state.profile = profileSnapshot.data();
       enterApp();
     } catch (error) {
       await signOut(auth);
-      $("login-error").textContent = error.message;
+      $("login-error").textContent = describeError(error);
     }
   });
 }
-window.setInterval(renderClocks, 1000);
+
+window.setInterval(() => paint(), 1000);
