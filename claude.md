@@ -310,36 +310,110 @@ Appears only when `role == "commander"`. Rendered above the session list.
 
 ## Firestore security rules
 
+Live copy: [`firestore.rules`](firestore.rules). Publish it after any change --
+the console copy is what actually runs.
+
+Two things the first draft of these rules got wrong, both found by probing the
+live project:
+
+- **Signed in is not the same as crew.** Email/password sign-up is open by
+  default and the web API key is published in the page, so anyone on the
+  internet can hold a valid session. Rules that said `request.auth != null`
+  handed that outsider every completion and every mission-day anchor. They now
+  require a `users/{uid}` document, which only the seed script creates.
+- **A filed document must not claim someone else's crew code.** `uid ==
+  request.auth.uid` alone let a caller write a completion or a void under any
+  `crewCode` they liked -- and the crew code is what the dashboard and the
+  exported CSV read. Creates now check the crew code against the caller's own
+  profile.
+
+Sign-up should also be switched off in the console: Authentication -> Settings
+-> User actions -> uncheck "Enable create (sign-up)". The crew accounts already
+exist; nobody needs to make another.
+
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users can read their own doc; commanders can read all
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Being signed in is not the same as being crew. Email/password sign-up is
+    // open by default and the project's API key is published in the page, so an
+    // outsider can hold a valid session. Only an account with a users/{uid}
+    // document -- one the seed script created -- counts as crew.
+    function isCrew() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isCommander() {
+      return isCrew() && profile().role == 'commander';
+    }
+
+    function isDataOfficer() {
+      return isCrew() && profile().crewCode in ['FE01', 'FE07'];
+    }
+
+    // A document filed by one crew member must not be able to claim another's
+    // crew code -- that is what the dashboard and the exported CSV read.
+    function filedBySelf() {
+      return isCrew()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.crewCode == profile().crewCode;
+    }
+
     match /users/{uid} {
-      allow read: if request.auth.uid == uid
-                  || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'commander';
-      allow write: if false; // managed via Firebase console only
+      allow read: if isCrew() && (request.auth.uid == uid || isCommander());
+      allow write: if false; // managed by the seed script only
     }
 
-    // Anyone authenticated can read mission day config
+    // Holds the per-day anchors under ids "1".."7", plus the commander-selected
+    // active day under the reserved id "active".
     match /missionDay/{day} {
-      allow read: if request.auth != null;
-      allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'commander';
+      allow read: if isCrew();
+      allow write: if isCommander();
     }
 
-    // Astronauts write only their own completions; everyone can read
+    // Tasks the commander adds to a session. Every crew member reads them --
+    // the crew can see what is outstanding and with whom -- only the commander
+    // writes. Titles are free text, so they stay inside the crew.
+    match /tasks/{taskId} {
+      allow read: if isCrew();
+      allow write: if isCommander();
+    }
+
+    // Void logs are health data. A crew member files their own and can read
+    // their own back; only the two data officers can read the whole set, which
+    // is what the CSV export needs. Nothing is ever updated or deleted -- a
+    // measurement that has been taken is a fact.
+    match /voids/{voidId} {
+      allow create: if filedBySelf();
+      // get and list are split deliberately. A list rule that inspects
+      // resource.data can only be satisfied by a query the engine can prove
+      // matches it; the export lists the whole collection, so its rule must
+      // stand on the caller alone.
+      allow get: if isDataOfficer()
+        || (isCrew() && resource.data.uid == request.auth.uid);
+      allow list: if isDataOfficer();
+      allow update, delete: if false;
+    }
+
     match /completions/{docId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null
-                    && request.resource.data.uid == request.auth.uid;
-      allow update, delete: if false; // no undoing from the app
+      allow read: if isCrew();
+      allow create: if filedBySelf();
+      allow update: if false; // no undoing from the app
+      allow delete: if isCommander(); // the Reset day action
     }
   }
 }
 ```
-
----
 
 ## Visual style
 

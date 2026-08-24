@@ -69,3 +69,25 @@ at the rollover. The Commander can remove one at any time.
 
 This needs the `/tasks` rule from `firestore.rules` — publish the file again if
 the console copy predates it, or added tasks will fail to save and to load.
+
+## Account and rule hardening
+
+Two exposures were found by probing the live project and are closed in
+`firestore.rules`:
+
+- **A signed-in account is not necessarily crew.** Firebase email/password
+  sign-up is open by default, and the web API key is public in the page source,
+  so an outsider can register and hold a valid session. Rules keyed on
+  `request.auth != null` gave that account read access to every completion and
+  mission-day anchor. Every rule now requires a `users/{uid}` document, which
+  only the seed script creates.
+- **A create could claim another crew member's code.** Checking only
+  `uid == request.auth.uid` allowed a completion or void to be filed under any
+  `crewCode` — the field the dashboard and the CSV export read. Creates now
+  check it against the caller's own profile.
+
+Also switch sign-up off in the console: **Authentication → Settings → User
+actions → uncheck "Enable create (sign-up)"**. All seven crew accounts already
+exist; nothing in the app ever needs to create another.
+
+Republish `firestore.rules` after pulling this change.
