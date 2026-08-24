@@ -161,9 +161,8 @@ These are fixed — they do not change day to day except where noted.
 | Circadian (morning) | Circadian | |
 | Bioimpedance (morning) | Bioimpedance | |
 | Saturation, Temp, Resp. Rate, BP | Bioimpedance | |
-| STP (morning) | STP | |
 | Chimp (morning) | Chimp | |
-| Urine analysis | Urine | **Days 1, 2, 6 only** |
+| Urine analysis | Urine | **Day 1 only** |
 
 ### Session 2 (T+04:00)
 | Test | Sheet | Notes |
@@ -186,7 +185,6 @@ These are fixed — they do not change day to day except where noted.
 | Water intake | Water | |
 | Daily Report | Report | |
 | Bioimpedance (evening) | Bioimpedance | |
-| STP (evening) | STP | |
 | Chimp (evening) | Chimp | |
 | Space Dragon Test A4 | — | **Days 4 and 6 only** |
 
@@ -219,11 +217,11 @@ do not show them greyed out.
 
 `testKey` values (use these exactly as document ID components):
 `sleep`, `circadian_morning`, `bioimpedance_morning`, `vitals_morning`,
-`stp_morning`, `chimp_morning`, `urine`,
+`chimp_morning`, `urine`,
 `circadian_midday`, `heart_time`, `hof`,
 `circadian_evening`, `pr_presentation`, `summary_report`,
 `circadian_midnight`, `water`, `daily_report`,
-`bioimpedance_evening`, `stp_evening`, `chimp_evening`, `space_dragon`
+`bioimpedance_evening`, `chimp_evening`, `space_dragon`
 
 ---
 

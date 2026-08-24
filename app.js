@@ -16,7 +16,7 @@ import {
   setDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=4";
+import { firebaseConfig } from "./firebase-config.js?v=5";
 
 const CREW_CODES = ["FE01", "FE02", "FE03", "FE04", "FE05", "FE06", "FE07"];
 const SESSION_ACCENTS = ["s1", "s2", "s3", "s4"];
@@ -39,9 +39,8 @@ const SESSIONS = [
       ["Circadian (morning)", "Circadian", "circadian_morning"],
       ["Bioimpedance (morning)", "Bioimpedance", "bioimpedance_morning"],
       ["Saturation, Temp, Resp. Rate, BP", "Bioimpedance", "vitals_morning"],
-      ["STP (morning)", "STP", "stp_morning"],
       ["Chimp (morning)", "Chimp", "chimp_morning"],
-      ["Urine analysis", "Urine", "urine", "Days 1, 2, 6 only"],
+      ["Urine analysis", "Urine", "urine", "Day 1 only"],
     ],
   },
   {
@@ -73,7 +72,6 @@ const SESSIONS = [
       ["Water intake", "Water", "water"],
       ["Daily Report", "Report", "daily_report"],
       ["Bioimpedance (evening)", "Bioimpedance", "bioimpedance_evening"],
-      ["STP (evening)", "STP", "stp_evening"],
       ["Chimp (evening)", "Chimp", "chimp_evening"],
       ["Space Dragon Test A4", "—", "space_dragon", "Days 4 and 6 only"],
     ],
@@ -172,7 +170,7 @@ function activeSession(seconds) {
 
 function testApplies(test, day) {
   const key = test[2];
-  if (key === "urine") return [1, 2, 6].includes(day);
+  if (key === "urine") return day === 1;
   if (key === "heart_time") return day >= 2 && day <= 5;
   if (["pr_presentation", "summary_report"].includes(key)) return day === 7;
   if (key === "space_dragon") return [4, 6].includes(day);
@@ -264,7 +262,8 @@ function renderSessions(current) {
 
 function renderTest(test, sessionNumber) {
   const id = completionId(sessionNumber, test[2], state.user.uid);
-  const completion = state.completions.get(id);
+  const stored = state.completions.get(id);
+  const completion = stored && Number(stored.dayNumber) === state.day ? stored : null;
   return `<div class="test ${completion ? "done" : ""}">
     <span class="mark">${completion ? "✓" : ""}</span>
     <span class="label">${test[0]}${test[3] ? `<span class="only">${test[3]}</span>` : ""}</span>
@@ -278,17 +277,22 @@ function renderTest(test, sessionNumber) {
 function renderDashboard() {
   const doneByKey = new Map();
   state.completions.forEach((completion) => {
+    if (Number(completion.dayNumber) !== state.day) return;
     if (!doneByKey.has(completion.testKey)) doneByKey.set(completion.testKey, []);
     doneByKey.get(completion.testKey).push(completion.crewCode);
   });
 
   let rows = "";
+  let doneCount = 0;
+  let dueCount = 0;
   SESSIONS.forEach((session, index) => {
     const tests = visibleTests(session, state.day);
     if (!tests.length) return;
     rows += `<tr class="sess-row ${SESSION_ACCENTS[index]}"><td colspan="4">${session.name}</td></tr>`;
     tests.forEach((test) => {
       const done = doneByKey.get(test[2]) || [];
+      doneCount += done.length;
+      dueCount += CREW_CODES.length;
       const pending = CREW_CODES.filter((code) => !done.includes(code));
       rows += `<tr><td>${test[0]}</td>`
         + `<td><div class="codes">${done.length ? done.map((code) => `<span class="yes">${code}</span>`).join("") : '<span class="none">—</span>'}</div></td>`
@@ -298,7 +302,9 @@ function renderDashboard() {
   });
 
   $("dash-day").textContent = state.day;
-  $("dash-summary").textContent = `${state.completions.size} completions`;
+  // Counts only what is actually due today. A test dropped from the protocol
+  // can leave completion documents behind; they must not pad today's total.
+  $("dash-summary").textContent = `${doneCount} / ${dueCount} completed`;
   $("dash-body").innerHTML = rows;
 }
 
@@ -527,12 +533,22 @@ function subscribeMissionDays() {
 }
 
 function subscribeCompletions() {
+  if (!db || !state.user) return;
   if (state.completionsDay === state.day) return;
   if (state.completionsUnsubscribe) state.completionsUnsubscribe();
-  state.completionsDay = state.day;
 
-  const completionsQuery = query(collection(db, "completions"), where("dayNumber", "==", state.day));
+  const boundDay = state.day;
+  state.completionsDay = boundDay;
+
+  // Yesterday's ticks must not survive the rollover on screen. Drop them now
+  // rather than leaving them up until the new day's first snapshot arrives —
+  // a checklist that shows work already done is worse than one that shows none.
+  state.completions = new Map();
+  state.completionsVersion += 1;
+
+  const completionsQuery = query(collection(db, "completions"), where("dayNumber", "==", boundDay));
   state.completionsUnsubscribe = onSnapshot(completionsQuery, (snapshot) => {
+    if (state.completionsDay !== boundDay) return; // a later day already took over
     state.completions = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
     state.completionsVersion += 1;
     paint(true);
