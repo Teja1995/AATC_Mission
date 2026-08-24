@@ -168,7 +168,6 @@ These are fixed — they do not change day to day except where noted.
 | Test | Sheet | Notes |
 |---|---|---|
 | Circadian (midday) | Circadian | |
-| Heart Time | Heart Time | **Days 2–5 only** |
 | Hof Protocol | Hof | |
 
 ### Session 3 (T+08:00)
@@ -218,7 +217,7 @@ do not show them greyed out.
 `testKey` values (use these exactly as document ID components):
 `sleep`, `circadian_morning`, `bioimpedance_morning`, `vitals_morning`,
 `chimp_morning`, `urine`,
-`circadian_midday`, `heart_time`, `hof`,
+`circadian_midday`, `hof`,
 `circadian_evening`, `pr_presentation`, `summary_report`,
 `circadian_midnight`, `water`, `daily_report`,
 `bioimpedance_evening`, `chimp_evening`, `space_dragon`
@@ -434,6 +433,40 @@ seed().catch(err => { console.error(err); process.exit(1); });
 5. Share `SpaceReady4!` with each crew member privately; they can change their password via Firebase console if needed.
 
 ---
+
+## Commander-added tasks
+
+Beyond the fixed battery, the Commander can add an ad-hoc task to any session of
+the current mission day and assign it either to one crew member or to everyone.
+
+- Added from the Commander's "Add a task" panel: title, session (1-4), assignee
+  (Everyone, or a single crew code).
+- The task appears in its session for the **whole crew**, tagged with who owes
+  it, so the dashboard shows what is outstanding and with whom.
+- Only the assignee sees a **Mark done** button. Everyone else sees the row with
+  `with FE03`, or a tick and `done by FE03` once it is finished. A task assigned
+  to Everyone behaves like a protocol test: each crew member ticks their own.
+- The Commander can remove a task; completions already filed against it are left
+  in place and simply stop being displayed.
+- Tasks belong to the mission day they were added on and disappear at the
+  rollover, like the day's completions.
+
+```
+/tasks/{taskId}              // taskId: "task_<base36 timestamp><random>"
+  dayNumber: number
+  sessionNumber: number      // 1-4
+  title: string
+  assignedTo: string         // "ALL" or a crew code, e.g. "FE03"
+  createdBy: uid
+  createdAt: string          // UTC ISO
+```
+
+Completions for an added task use the task id as the `testKey`, so the document
+id keeps the same shape: `{dayNumber}_{sessionNumber}_{taskId}_{uid}`.
+
+Firestore rules: anyone signed in reads `/tasks`; only a commander writes. The
+assignee rule is enforced in the UI, on the same footing as every other test —
+the rules stop a crew member writing a completion under anyone else's uid.
 
 ## Out of scope (do not build)
 

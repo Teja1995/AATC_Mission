@@ -71,3 +71,15 @@ normal path proves unreliable in the habitat.
 who reads the page source can append rows to the sheet. It cannot read the sheet
 back, and the sheet stays shared with FE01 and FE07 only. That is the trade for
 having no backend; if junk rows ever appear, redeploy the script at a new URL.
+
+## Commander-added tasks
+
+The Commander's **Add a task** panel puts an ad-hoc job into any session of the
+current mission day, assigned to one crew member or to everyone. The task shows
+up in that session for the whole crew and in the dashboard, tagged with who owes
+it; only the assignee gets a **Mark done** button, and everyone else sees `with
+FE03` until it is done. Tasks are scoped to the day they were added on and clear
+at the rollover. The Commander can remove one at any time.
+
+This needs the `/tasks` rule from `firestore.rules` — publish the file again if
+the console copy predates it, or added tasks will fail to save and to load.

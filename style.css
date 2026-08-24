@@ -765,3 +765,89 @@ tr.sess-row.s4 td { color: var(--pink); }
   .fab { padding: 12px 18px; font-size: 14px; }
   .swatch { font-size: 12px; }
 }
+
+/* ---------- Commander-added tasks ---------- */
+
+#tasks-panel { border-color: #4a3a12; }
+
+.task-title {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.task-title:focus { outline: none; border-color: var(--amber); }
+
+#task-session, #task-assignee {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: var(--mono);
+  margin-left: 6px;
+  padding: 6px 10px;
+}
+
+.task-list { margin-top: 6px; }
+
+.task-row {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 10px;
+  padding: 9px 0;
+}
+
+.task-session-tag {
+  background: var(--card-raised);
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 7px;
+}
+
+.task-row-title { flex: 1 1 auto; min-width: 0; }
+
+.assignee {
+  background: rgba(240, 180, 41, .14);
+  border-radius: 999px;
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 11px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.assignee.all { background: rgba(0, 229, 204, .12); color: var(--teal); }
+
+.btn-remove {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 8px;
+}
+
+.btn-remove:hover { border-color: var(--danger); color: var(--danger); }
+
+.test.added { background: rgba(240, 180, 41, .045); }
+
+.added-tag {
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .06em;
+}
+
+.waiting {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}

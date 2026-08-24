@@ -16,7 +16,7 @@ import {
   setDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { APPS_SCRIPT_URL, firebaseConfig } from "./firebase-config.js?v=6";
+import { APPS_SCRIPT_URL, firebaseConfig } from "./firebase-config.js?v=7";
 
 // Armstrong urine colour scale. The swatches on screen carry these colours so
 // the crew matches a colour to a colour, not a colour to a number — the printed
@@ -33,6 +33,7 @@ const COLOUR_SCALE = [
 ];
 
 const VOID_OUTBOX_KEY = "aatc-void-outbox";
+const ASSIGN_ALL = "ALL";
 
 const CREW_CODES = ["FE01", "FE02", "FE03", "FE04", "FE05", "FE06", "FE07"];
 const SESSION_ACCENTS = ["s1", "s2", "s3", "s4"];
@@ -65,7 +66,6 @@ const SESSIONS = [
     end: 8,
     tests: [
       ["Circadian (midday)", "Circadian", "circadian_midday"],
-      ["Heart Time", "Heart Time", "heart_time", "Days 2–5 only"],
       ["Hof Protocol", "Hof", "hof"],
     ],
   },
@@ -103,11 +103,13 @@ const state = {
   pointerDay: null,          // commander-selected day, from missionDay/active
   day: 1,                    // derived: pointer day plus whole elapsed mission days
   baseDay: null,             // the day whose anchor the clock is counting from
-  completionsDay: null,      // the day the completions listener is bound to
+  dayDataDay: null,          // the day the completions and tasks listeners are bound to
   completions: new Map(),
+  tasks: new Map(),          // commander-added tasks for the current day
   completionsVersion: 0,
   unsubscribers: [],
   completionsUnsubscribe: null,
+  tasksUnsubscribe: null,
   previousSession: null,
   pulseSession: null,
   selectedSession: null,
@@ -188,7 +190,6 @@ function activeSession(seconds) {
 function testApplies(test, day) {
   const key = test[2];
   if (key === "urine") return day === 1;
-  if (key === "heart_time") return day >= 2 && day <= 5;
   if (["pr_presentation", "summary_report"].includes(key)) return day === 7;
   if (key === "space_dragon") return [4, 6].includes(day);
   return true;
@@ -198,8 +199,70 @@ function visibleTests(session, day) {
   return session.tests.filter((test) => testApplies(test, day));
 }
 
+// The fixed protocol tests and the commander's added tasks render through one
+// shape, so a task behaves like a test everywhere — session list, dashboard and
+// completion id alike — instead of needing a parallel path through each.
+function sessionItems(sessionIndex) {
+  const fixed = visibleTests(SESSIONS[sessionIndex], state.day).map((test) => ({
+    key: test[2],
+    label: test[0],
+    sheet: test[1],
+    note: test[3] ?? null,
+    assignedTo: null,
+    taskId: null,
+  }));
+
+  const added = [...state.tasks.entries()]
+    .filter(([, task]) => Number(task.sessionNumber) === sessionIndex + 1)
+    .sort((a, b) => String(a[1].createdAt).localeCompare(String(b[1].createdAt)))
+    .map(([id, task]) => ({
+      key: id,
+      label: task.title,
+      sheet: null,
+      note: null,
+      assignedTo: task.assignedTo || ASSIGN_ALL,
+      taskId: id,
+    }));
+
+  return [...fixed, ...added];
+}
+
+// Who owes this item. A task assigned to one crew member is that member's alone;
+// everything else is the whole crew's.
+function rosterFor(item) {
+  return item.assignedTo && item.assignedTo !== ASSIGN_ALL ? [item.assignedTo] : CREW_CODES;
+}
+
+function doneCodes(item) {
+  const codes = [];
+  state.completions.forEach((completion) => {
+    if (Number(completion.dayNumber) !== state.day) return;
+    if (completion.testKey !== item.key) return;
+    if (!codes.includes(completion.crewCode)) codes.push(completion.crewCode);
+  });
+  return codes;
+}
+
+function isMine(item) {
+  if (!item.assignedTo || item.assignedTo === ASSIGN_ALL) return true;
+  return item.assignedTo === state.profile?.crewCode;
+}
+
 function completionId(sessionNumber, testKey, uid) {
   return `${state.day}_${sessionNumber}_${testKey}_${uid}`;
+}
+
+// Task titles are free text typed by a human, so they are escaped rather than
+// interpolated raw into the row markup.
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value).replace(/"/g, "&quot;");
 }
 
 function describeError(error) {
@@ -257,7 +320,7 @@ function renderSessions(current) {
   });
 
   const session = SESSIONS[selected];
-  const tests = visibleTests(session, state.day);
+  const items = sessionItems(selected);
   const status = current === null
     ? "upcoming"
     : selected === current ? "active" : selected < current ? "past" : "upcoming";
@@ -269,52 +332,75 @@ function renderSessions(current) {
         <span class="window">T+${String(session.start).padStart(2, "0")}:00:00 – ${windowEnd}</span>
         <span class="badge ${selected === current ? "now" : ""}">${selected === current ? "Active" : status}</span>
       </div>
-      ${tests.length ? tests.map((test) => renderTest(test, selected + 1)).join("") : "<div class=\"empty\">No tests scheduled.</div>"}
+      ${items.length ? items.map((item) => renderItem(item, selected + 1)).join("") : "<div class=\"empty\">No tests scheduled.</div>"}
     </section>`;
 
   document.querySelectorAll("[data-complete]").forEach((button) => {
     button.addEventListener("click", () => markDone(button.dataset.session, button.dataset.test));
   });
+  document.querySelectorAll("[data-remove-task]").forEach((button) => {
+    button.addEventListener("click", () => removeTask(button.dataset.removeTask, button.dataset.title));
+  });
 }
 
-function renderTest(test, sessionNumber) {
-  const id = completionId(sessionNumber, test[2], state.user.uid);
-  const stored = state.completions.get(id);
-  const completion = stored && Number(stored.dayNumber) === state.day ? stored : null;
-  return `<div class="test ${completion ? "done" : ""}">
-    <span class="mark">${completion ? "✓" : ""}</span>
-    <span class="label">${test[0]}${test[3] ? `<span class="only">${test[3]}</span>` : ""}</span>
-    <span class="sheet">Sheet: ${test[1]}</span>
-    ${completion
-      ? `<span class="done-stamp">done</span>`
-      : `<button class="btn-mark" type="button" data-complete="1" data-session="${sessionNumber}" data-test="${test[2]}">Mark done</button>`}
+function renderItem(item, sessionNumber) {
+  const mine = isMine(item);
+  const done = doneCodes(item);
+  const stored = state.completions.get(completionId(sessionNumber, item.key, state.user.uid));
+  const myDone = Boolean(stored) && Number(stored.dayNumber) === state.day;
+  // A task assigned to someone else is still shown to everyone, ticked when
+  // that person has done it -- the crew can see what is outstanding and whose.
+  const settled = mine ? myDone : done.includes(item.assignedTo);
+
+  const assignee = item.taskId
+    ? `<span class="assignee ${item.assignedTo === ASSIGN_ALL ? "all" : ""}">${
+        item.assignedTo === ASSIGN_ALL ? "Everyone" : item.assignedTo}</span>`
+    : "";
+  const removal = item.taskId && state.profile?.role === "commander"
+    ? `<button class="btn-remove" type="button" data-remove-task="${item.taskId}" data-title="${escapeAttr(item.label)}" title="Remove task" aria-label="Remove task">✕</button>`
+    : "";
+
+  let action;
+  if (!mine) {
+    action = settled
+      ? `<span class="done-stamp">done by ${item.assignedTo}</span>`
+      : `<span class="waiting">with ${item.assignedTo}</span>`;
+  } else if (myDone) {
+    action = `<span class="done-stamp">done</span>`;
+  } else {
+    action = `<button class="btn-mark" type="button" data-complete="1" data-session="${sessionNumber}" data-test="${item.key}">Mark done</button>`;
+  }
+
+  return `<div class="test ${settled ? "done" : ""} ${item.taskId ? "added" : ""}">
+    <span class="mark">${settled ? "✓" : ""}</span>
+    <span class="label">${escapeHtml(item.label)}${item.note ? `<span class="only">${item.note}</span>` : ""}${assignee}</span>
+    ${item.sheet ? `<span class="sheet">Sheet: ${item.sheet}</span>` : `<span class="sheet added-tag">Added task</span>`}
+    ${action}
+    ${removal}
   </div>`;
 }
 
 function renderDashboard() {
-  const doneByKey = new Map();
-  state.completions.forEach((completion) => {
-    if (Number(completion.dayNumber) !== state.day) return;
-    if (!doneByKey.has(completion.testKey)) doneByKey.set(completion.testKey, []);
-    doneByKey.get(completion.testKey).push(completion.crewCode);
-  });
-
   let rows = "";
   let doneCount = 0;
   let dueCount = 0;
   SESSIONS.forEach((session, index) => {
-    const tests = visibleTests(session, state.day);
-    if (!tests.length) return;
+    const items = sessionItems(index);
+    if (!items.length) return;
     rows += `<tr class="sess-row ${SESSION_ACCENTS[index]}"><td colspan="4">${session.name}</td></tr>`;
-    tests.forEach((test) => {
-      const done = doneByKey.get(test[2]) || [];
+    items.forEach((item) => {
+      // An added task counts against its assignee only, so a one-person task
+      // reads 0/1 rather than looking like six people are late.
+      const roster = rosterFor(item);
+      const done = doneCodes(item).filter((code) => roster.includes(code));
+      const pending = roster.filter((code) => !done.includes(code));
       doneCount += done.length;
-      dueCount += CREW_CODES.length;
-      const pending = CREW_CODES.filter((code) => !done.includes(code));
-      rows += `<tr><td>${test[0]}</td>`
+      dueCount += roster.length;
+      const tag = item.taskId ? '<span class="added-tag">Added</span>' : "";
+      rows += `<tr><td>${escapeHtml(item.label)} ${tag}</td>`
         + `<td><div class="codes">${done.length ? done.map((code) => `<span class="yes">${code}</span>`).join("") : '<span class="none">—</span>'}</div></td>`
         + `<td><div class="codes">${pending.length ? pending.map((code) => `<span class="no">${code}</span>`).join("") : '<span class="none">—</span>'}</div></td>`
-        + `<td class="count">${done.length}/${CREW_CODES.length}</td></tr>`;
+        + `<td class="count">${done.length}/${roster.length}</td></tr>`;
     });
   });
 
@@ -337,7 +423,8 @@ function paint(force = false) {
     state.selectedSession = null;
     state.previousSession = null;
     syncDaySelect();
-    subscribeCompletions();
+    renderTaskList();
+    subscribeDayData();
   }
   state.baseDay = clock.baseDay;
 
@@ -495,6 +582,14 @@ async function markDone(sessionNumber, testKey) {
     showToast("No mission day has been started yet. Ask the Commander to start the day.", true);
     return;
   }
+  // Only the crew member a task is assigned to can tick it off. The button is
+  // not rendered for anyone else; this catches a stale screen mid-reassignment.
+  const task = state.tasks.get(testKey);
+  if (task && task.assignedTo && task.assignedTo !== ASSIGN_ALL
+      && task.assignedTo !== state.profile.crewCode) {
+    showToast(`That task is assigned to ${task.assignedTo}.`, true);
+    return;
+  }
   const id = completionId(sessionNumber, testKey, state.user.uid);
   try {
     await setDoc(doc(db, "completions", id), {
@@ -519,9 +614,14 @@ function clearSubscriptions() {
     state.completionsUnsubscribe();
     state.completionsUnsubscribe = null;
   }
-  state.completionsDay = null;
+  if (state.tasksUnsubscribe) {
+    state.tasksUnsubscribe();
+    state.tasksUnsubscribe = null;
+  }
+  state.dayDataDay = null;
   state.anchors = new Map();
   state.completions = new Map();
+  state.tasks = new Map();
 }
 
 // One listener covers every anchor plus the active-day pointer, so a rollover
@@ -546,31 +646,116 @@ function subscribeMissionDays() {
     state.pointerDay = pointerDay;
     updateLastSaved();
     paint(true);
-    subscribeCompletions();
+    subscribeDayData();
   }, (error) => showToast(`Mission day unavailable: ${describeError(error)}`, true)));
 }
 
-function subscribeCompletions() {
+// Completions and added tasks are both scoped to one mission day and rebind
+// together at the rollover.
+function subscribeDayData() {
   if (!db || !state.user) return;
-  if (state.completionsDay === state.day) return;
+  if (state.dayDataDay === state.day) return;
   if (state.completionsUnsubscribe) state.completionsUnsubscribe();
+  if (state.tasksUnsubscribe) state.tasksUnsubscribe();
 
   const boundDay = state.day;
-  state.completionsDay = boundDay;
+  state.dayDataDay = boundDay;
 
   // Yesterday's ticks must not survive the rollover on screen. Drop them now
   // rather than leaving them up until the new day's first snapshot arrives —
   // a checklist that shows work already done is worse than one that shows none.
   state.completions = new Map();
+  state.tasks = new Map();
   state.completionsVersion += 1;
 
   const completionsQuery = query(collection(db, "completions"), where("dayNumber", "==", boundDay));
   state.completionsUnsubscribe = onSnapshot(completionsQuery, (snapshot) => {
-    if (state.completionsDay !== boundDay) return; // a later day already took over
+    if (state.dayDataDay !== boundDay) return; // a later day already took over
     state.completions = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
     state.completionsVersion += 1;
     paint(true);
   }, (error) => showToast(`Dashboard unavailable: ${describeError(error)}`, true));
+
+  const tasksQuery = query(collection(db, "tasks"), where("dayNumber", "==", boundDay));
+  state.tasksUnsubscribe = onSnapshot(tasksQuery, (snapshot) => {
+    if (state.dayDataDay !== boundDay) return;
+    state.tasks = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
+    state.completionsVersion += 1;
+    renderTaskList();
+    paint(true);
+  }, (error) => showToast(`Added tasks unavailable: ${describeError(error)}`, true));
+}
+
+/* ---------------------------------------------------------- added tasks -- */
+
+// Tasks belong to the mission day they were added on. They appear in their
+// session for the whole crew; only the person they are assigned to can tick
+// one off, but everybody can see that it is outstanding and with whom.
+async function addTask(event) {
+  event.preventDefault();
+  const title = $("task-title").value.trim();
+  if (!title) return;
+
+  const sessionNumber = Number($("task-session").value);
+  const assignedTo = $("task-assignee").value;
+  const taskId = `task_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+  try {
+    await setDoc(doc(db, "tasks", taskId), {
+      dayNumber: state.day,
+      sessionNumber,
+      title,
+      assignedTo,
+      createdBy: state.user.uid,
+      createdAt: new Date().toISOString(),
+    });
+    $("task-form").reset();
+    $("task-session").value = String(sessionNumber);
+    showToast(`Task added to Session ${sessionNumber} for ${assignedTo === ASSIGN_ALL ? "everyone" : assignedTo}.`);
+  } catch (error) {
+    showToast(`Could not add the task: ${describeError(error)}`, true);
+  }
+}
+
+async function removeTask(taskId, title) {
+  if (!window.confirm(`Remove "${title}" from Mission Day ${state.day}?`)) return;
+  try {
+    await deleteDoc(doc(db, "tasks", taskId));
+    showToast("Task removed.");
+  } catch (error) {
+    showToast(`Could not remove the task: ${describeError(error)}`, true);
+  }
+}
+
+function renderTaskList() {
+  if (state.profile?.role !== "commander") return;
+  $("tasks-panel-day").textContent = `Mission Day ${state.day}`;
+
+  const entries = [...state.tasks.entries()]
+    .sort((a, b) => Number(a[1].sessionNumber) - Number(b[1].sessionNumber)
+      || String(a[1].createdAt).localeCompare(String(b[1].createdAt)));
+
+  if (!entries.length) {
+    $("task-list").innerHTML = '<p class="hint">No added tasks for this day.</p>';
+    return;
+  }
+
+  $("task-list").innerHTML = entries.map(([id, task]) => {
+    const roster = task.assignedTo && task.assignedTo !== ASSIGN_ALL ? [task.assignedTo] : CREW_CODES;
+    const done = doneCodes({ key: id }).filter((code) => roster.includes(code));
+    return `<div class="task-row">
+      <span class="task-session-tag">S${task.sessionNumber}</span>
+      <span class="task-row-title">${escapeHtml(task.title)}</span>
+      <span class="assignee ${task.assignedTo === ASSIGN_ALL ? "all" : ""}">${
+        task.assignedTo === ASSIGN_ALL ? "Everyone" : task.assignedTo}</span>
+      <span class="count">${done.length}/${roster.length}</span>
+      <button class="btn-remove" type="button" data-remove-task="${id}" data-title="${escapeAttr(task.title)}" aria-label="Remove task">✕</button>
+    </div>`;
+  }).join("");
+
+  $("task-list").querySelectorAll("[data-remove-task]").forEach((button) => {
+    button.addEventListener("click", () => removeTask(button.dataset.removeTask, button.dataset.title));
+  });
 }
 
 /* ------------------------------------------------------------- log void -- */
@@ -767,6 +952,10 @@ function configureUi() {
   $("tab-sessions").addEventListener("click", () => switchTab("sessions"));
   $("tab-dashboard").addEventListener("click", () => switchTab("dashboard"));
 
+  $("task-assignee").innerHTML = `<option value="${ASSIGN_ALL}">Everyone</option>`
+    + CREW_CODES.map((code) => `<option value="${code}">${code}</option>`).join("");
+  $("task-form").addEventListener("submit", addTask);
+
   renderSwatches();
   renderPending(readOutbox().length);
   $("log-void-btn").addEventListener("click", openVoidModal);
@@ -802,9 +991,11 @@ function enterApp() {
   $("crew-chip").textContent = state.profile.crewCode;
   $("crew-chip").classList.toggle("commander", state.profile.role === "commander");
   $("commander-panel").classList.toggle("hidden", state.profile.role !== "commander");
+  $("tasks-panel").classList.toggle("hidden", state.profile.role !== "commander");
   syncDaySelect();
+  renderTaskList();
   subscribeMissionDays();
-  subscribeCompletions();
+  subscribeDayData();
   paint(true);
 }
 
