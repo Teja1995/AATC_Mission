@@ -10,13 +10,14 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   getFirestore,
   onSnapshot,
   query,
   setDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { APPS_SCRIPT_URL, firebaseConfig } from "./firebase-config.js?v=7";
+import { firebaseConfig } from "./firebase-config.js?v=8";
 
 // Armstrong urine colour scale. The swatches on screen carry these colours so
 // the crew matches a colour to a colour, not a colour to a number — the printed
@@ -34,6 +35,10 @@ const COLOUR_SCALE = [
 
 const VOID_OUTBOX_KEY = "aatc-void-outbox";
 const ASSIGN_ALL = "ALL";
+
+// Void logs are health data. Only the two crew members named in the protocol
+// can read them back or export them; everyone else can only add their own.
+const DATA_OFFICERS = ["FE01", "FE07"];
 
 const CREW_CODES = ["FE01", "FE02", "FE03", "FE04", "FE05", "FE06", "FE07"];
 const SESSION_ACCENTS = ["s1", "s2", "s3", "s4"];
@@ -789,21 +794,23 @@ function renderPending(count) {
   badge.title = count === 1 ? "1 entry waiting to be sent" : `${count} entries waiting to be sent`;
 }
 
+// The document id is the crew code and the moment of the void, so a retry after
+// a lost response writes the same document again instead of a second row. There
+// is no such thing as a duplicated void.
+function voidDocId(payload) {
+  return `${payload.crewCode}_${payload.utcDateTime.replace(/[:.]/g, "-")}`;
+}
+
 async function postEntry(entry) {
-  // No custom headers on purpose. Anything beyond a simple request triggers a
-  // CORS preflight, and an Apps Script web app cannot answer OPTIONS — the
-  // POST would fail before it ever reached the sheet.
-  const response = await fetch(APPS_SCRIPT_URL, {
-    method: "POST",
-    body: JSON.stringify(entry.payload),
-    redirect: "follow",
+  await setDoc(doc(db, "voids", voidDocId(entry.payload)), {
+    uid: entry.payload.uid,
+    crewCode: entry.payload.crewCode,
+    missionDay: entry.payload.missionDay,
+    missionTime: entry.payload.missionTime,
+    utcDateTime: entry.payload.utcDateTime,
+    volumeMl: entry.payload.volumeMl,
+    colourScore: entry.payload.colourScore,
   });
-  const body = (await response.text()).trim();
-  if (!response.ok) throw new Error(`Sheet returned ${response.status}`);
-  if (/unknown crew code/i.test(body)) {
-    throw new Error(`The sheet has no tab named ${entry.payload.crewCode}. Entry kept on this device.`);
-  }
-  return body;
 }
 
 let flushing = false;
@@ -812,10 +819,7 @@ async function flushOutbox({ announce = false } = {}) {
   if (flushing) return;
   let entries = readOutbox();
   if (!entries.length) return;
-  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.startsWith("PASTE_")) {
-    if (announce) showToast("Sheet endpoint not configured — entry saved on this device.", true);
-    return;
-  }
+  if (!db || !state.user) return;
 
   flushing = true;
   let sent = 0;
@@ -837,8 +841,61 @@ async function flushOutbox({ announce = false } = {}) {
     flushing = false;
   }
 
-  if (sent && announce) showToast(sent === 1 ? "Void logged to the sheet." : `${sent} void entries sent.`);
+  if (sent && announce) showToast(sent === 1 ? "Void logged." : `${sent} void entries saved.`);
   else if (sent) showToast(`${sent} queued void ${sent === 1 ? "entry" : "entries"} sent.`);
+}
+
+// The columns the protocol asks for, in that order.
+const VOID_CSV_COLUMNS = [
+  ["crewCode", "Crew Code"],
+  ["missionDay", "Mission Day"],
+  ["missionTime", "Mission Time"],
+  ["utcDateTime", "UTC Date & Time"],
+  ["volumeMl", "Volume (mL)"],
+  ["colourScore", "Colour (1-8)"],
+];
+
+function csvCell(value) {
+  const text = value === undefined || value === null ? "" : String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+async function exportVoidsCsv() {
+  const button = $("export-voids-btn");
+  button.disabled = true;
+  try {
+    const snapshot = await getDocs(collection(db, "voids"));
+    const rows = snapshot.docs
+      .map((item) => item.data())
+      .sort((a, b) => String(a.crewCode).localeCompare(String(b.crewCode))
+        || String(a.utcDateTime).localeCompare(String(b.utcDateTime)));
+
+    if (!rows.length) {
+      showToast("No voids logged yet.", true);
+      return;
+    }
+
+    const csv = [VOID_CSV_COLUMNS.map(([, header]) => header).join(",")]
+      .concat(rows.map((row) => VOID_CSV_COLUMNS.map(([field]) => csvCell(row[field])).join(",")))
+      .join("\r\n");
+
+    // A BOM so Excel opens it as UTF-8 rather than mangling it.
+    const blob = new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `aatc_void_log_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    showToast(`Exported ${rows.length} void ${rows.length === 1 ? "entry" : "entries"}.`);
+  } catch (error) {
+    showToast(`Could not export: ${describeError(error)}`, true);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function renderSwatches() {
@@ -907,6 +964,7 @@ async function submitVoid(event) {
   const entry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     payload: {
+      uid: state.user.uid,
       crewCode: state.profile.crewCode,
       missionDay: state.day,
       // Empty rather than a fake reading when no day has been anchored yet.
@@ -955,6 +1013,7 @@ function configureUi() {
   $("task-assignee").innerHTML = `<option value="${ASSIGN_ALL}">Everyone</option>`
     + CREW_CODES.map((code) => `<option value="${code}">${code}</option>`).join("");
   $("task-form").addEventListener("submit", addTask);
+  $("export-voids-btn").addEventListener("click", exportVoidsCsv);
 
   renderSwatches();
   renderPending(readOutbox().length);
@@ -992,6 +1051,7 @@ function enterApp() {
   $("crew-chip").classList.toggle("commander", state.profile.role === "commander");
   $("commander-panel").classList.toggle("hidden", state.profile.role !== "commander");
   $("tasks-panel").classList.toggle("hidden", state.profile.role !== "commander");
+  $("data-officer-panel").classList.toggle("hidden", !DATA_OFFICERS.includes(state.profile.crewCode));
   syncDaySelect();
   renderTaskList();
   subscribeMissionDays();

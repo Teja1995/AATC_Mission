@@ -481,74 +481,77 @@ the rules stop a crew member writing a completion under anyone else's uid.
 
 ### Overview
 Astronauts log urine volume via a 2-field form in the app. All other fields are
-auto-populated from the live mission clock and the logged-in user. Data is written
-to a private Google Sheet via a Google Apps Script web app. The sheet is visible
-only to FE01 and FE07.
+auto-populated from the live mission clock and the logged-in user. Entries are
+stored in Firestore and exported as a single CSV at the end of the mission by
+FE01 or FE07, who are the only people able to read the collection back.
+
+*(This originally posted to a private Google Sheet through an Apps Script web
+app. That path needed a publicly callable URL embedded in the page -- a write
+capability anyone reading the source could use -- and the deployment would not
+serve anonymous callers. Firestore already carries every other piece of mission
+state, so the void log goes there too and leaves as a CSV at the end.)*
 
 ### What the astronaut sees
-A "Log Void" button accessible from any screen at any time. Tapping it opens:
+A "Log Void" button fixed to every screen, available at any mission time. It
+opens a form with exactly two inputs:
 
+- **Volume (mL)** -- a number.
+- **Colour (1-8)** -- eight swatches painted in the Armstrong scale's own
+  colours, so the crew matches a colour to a colour rather than translating one
+  into a number. The selected score shows its status text, and 7-8 reads
+  "Flag to FE01".
 
-### What the app sends automatically (no astronaut input)
-- `crewCode` — from the logged-in user's Firestore document
-- `missionDay` — from `missionDay/{dayNumber}` in Firestore
-- `missionTime` — computed live: `T+HH:MM:SS`
-- `utcDateTime` — `new Date().toISOString()` at moment of submit
+### What the app records automatically (no astronaut input)
+- `crewCode` -- from the logged-in user's Firestore document
+- `missionDay` -- the current derived mission day
+- `missionTime` -- computed live: `T+HH:MM:SS` (empty if no day is anchored yet;
+  `utcDateTime` always allows it to be reconstructed afterwards)
+- `utcDateTime` -- `new Date().toISOString()` at the moment of submit
+- `uid` -- so the security rules can pin the entry to its author
 
-### POST request
-On Submit, the app sends a POST to the Google Apps Script web app URL:
+All of these are shown above the form, ticking live, so the astronaut can see
+what is being filed.
 
-```js
-fetch(APPS_SCRIPT_URL, {
-  method: 'POST',
-  body: JSON.stringify({
-    crewCode:    'FE07',
-    missionDay:  3,
-    missionTime: 'T+05:42:17',
-    utcDateTime: '2026-08-25T09:12:00.000Z',
-    volumeMl:    280,
-    colourScore: 3
-  })
-});
+### Storage
+
+```
+/voids/{crewCode}_{utcDateTime}      // colons and dots replaced with hyphens
+  uid: string
+  crewCode: string
+  missionDay: number
+  missionTime: string
+  utcDateTime: string
+  volumeMl: number
+  colourScore: number
 ```
 
-`APPS_SCRIPT_URL` is stored as a constant in `firebase-config.js`.
+The document id is the crew code and the moment of the void, so a retry after a
+lost response overwrites the same document instead of creating a second one.
+A void cannot be duplicated.
 
-### Google Apps Script
-Attached to the Google Sheet `AATC_UrineVolume`. Published as a web app
-(Execute as: Me, Access: Anyone).
+### Nothing is lost if the network is
 
-```js
-function doPost(e) {
-  const data = JSON.parse(e.postData.contents);
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(data.crewCode);
-  if (!sheet) return ContentService.createTextOutput('Unknown crew code');
-  sheet.appendRow([
-    data.crewCode,
-    data.missionDay,
-    data.missionTime,
-    data.utcDateTime,
-    data.volumeMl,
-    data.colourScore
-  ]);
-  return ContentService.createTextOutput('OK');
-}
-```
+A void cannot be measured twice. Each entry is written to the device before
+Firestore is touched and stays there until the write is confirmed. The count of
+unsent entries shows on the Log Void button; the queue is retried every minute,
+when the browser comes back online, and on the next submit.
 
-### Google Sheet structure
-File: `AATC_UrineVolume` (shared with FE01 and FE07 only)
-7 tabs: FE01, FE02, FE03, FE04, FE05, FE06, FE07
+### Export
 
-Column headers on every tab:
+FE01 and FE07 see a **Void log** panel with **Download void log (CSV)**. It
+reads the whole collection and writes one UTF-8 file:
+
 | A | B | C | D | E | F |
 |---|---|---|---|---|---|
-| Crew Code | Mission Day | Mission Time | UTC Date & Time | Volume (mL) | Colour (1–8) |
+| Crew Code | Mission Day | Mission Time | UTC Date & Time | Volume (mL) | Colour (1-8) |
 
-### Colour reference (Armstrong scale — print and post near the toilet)
+Sorted by crew code, then by time. Rows are never updated or deleted from the
+app -- a measurement that has been taken is a fact.
+
+### Colour reference (Armstrong scale -- print and post near the toilet)
 | Score | Colour | Status |
 |---|---|---|
-| 1–2 | Pale straw | Well hydrated |
-| 3–4 | Yellow | Adequate |
-| 5–6 | Dark / amber | Mild dehydration |
-| 7–8 | Dark amber / brown | Flag to FE01 |
+| 1-2 | Pale straw | Well hydrated |
+| 3-4 | Yellow | Adequate |
+| 5-6 | Dark / amber | Mild dehydration |
+| 7-8 | Dark amber / brown | Flag to FE01 |

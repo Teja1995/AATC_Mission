@@ -29,6 +29,27 @@ service cloud.firestore {
       allow write: if isCommander();
     }
 
+    // Void logs are health data. A crew member files their own and can read
+    // their own back; only the two data officers can read the whole set, which
+    // is what the CSV export needs. Nothing is ever updated or deleted -- a
+    // measurement that has been taken is a fact.
+    function isDataOfficer() {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.crewCode in ['FE01', 'FE07'];
+    }
+
+    match /voids/{voidId} {
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      // get and list are split deliberately. A list rule that inspects
+      // resource.data can only be satisfied by a query the engine can prove
+      // matches it; the export lists the whole collection, so its rule must
+      // stand on the caller alone.
+      allow get: if isDataOfficer()
+        || (signedIn() && resource.data.uid == request.auth.uid);
+      allow list: if isDataOfficer();
+      allow update, delete: if false;
+    }
+
     match /completions/{docId} {
       allow read: if signedIn();
       allow create: if signedIn()

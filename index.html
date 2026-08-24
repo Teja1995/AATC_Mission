@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Mission Data Tracker — AATC</title>
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#128752;</text></svg>">
 </head>
 <body>
@@ -161,6 +161,20 @@
       </div>
     </section>
 
+    <!-- FE01 and FE07 only: the void log leaves the app here -->
+    <section class="card hidden" id="data-officer-panel">
+      <div class="panel-head">
+        <h2 style="color:var(--teal)">Void log</h2>
+        <span class="hint" id="voids-hint">Health data &mdash; FE01 and FE07 only</span>
+      </div>
+      <div class="panel-body">
+        <div class="row">
+          <button class="btn" id="export-voids-btn" type="button">Download void log (CSV)</button>
+          <span class="hint">Every void logged by the crew, all seven days, one file.</span>
+        </div>
+      </div>
+    </section>
+
     <!-- Day + session state -->
     <section class="card">
       <div class="day-strip">
@@ -238,6 +252,6 @@
   </div>
 </div>
 
-<script type="module" src="app.js?v=7"></script>
+<script type="module" src="app.js?v=8"></script>
 </body>
 </html>
