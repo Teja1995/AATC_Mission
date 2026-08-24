@@ -197,14 +197,29 @@ since the menu is shut most of the time.
   Android; **Safari has no such API**, so the barcode field is always typeable
   and the Look up button works either way. A USB barcode gun works too — those
   type the digits and press Enter, which the field handles.
-- The barcode is looked up in **Open Food Facts** (free, no key, permissive
-  CORS), filling in the product name and kcal per 100 g.
+- The barcode is looked up **in the crew's own list first**, then in
+  **Open Food Facts** (free, no key, permissive CORS), filling in the product
+  name and kcal per 100 g. Where a product carries only kilojoules, the figure
+  is converted and the hint says so.
 - Enter the grams eaten and the **total kcal** is computed. That total is the
   measure; it stays editable, and every field the lookup filled can be
   overwritten.
 - **A barcode is never required.** An analog habitat repacks most of its food,
   so naming the food and typing the kcal is a first-class path, recorded as
   `source: "manual"` rather than `"barcode"`.
+
+### The crew's own food list
+
+Open Food Facts is thin on Polish shelf products — of five real Polish barcodes
+tested, three were not in it at all — and it knows nothing about repacked
+habitat rations. So whenever a barcode is logged with a name and an energy
+figure, that pairing is saved to `/foodItems/{barcode}`, shared by the whole
+crew. The next person to scan the same packet gets it filled in instantly,
+credited to whoever added it, with no internet involved.
+
+The list is consulted **before** the internet, so a product the crew has already
+identified resolves immediately even if Open Food Facts is slow or unreachable.
+Anyone can improve an entry; the display account cannot write to it.
 
 **My food log** is a tab beside My urine log: your own entries, newest first,
 with the day's running kcal total in the header. Edit corrects an entry; Delete

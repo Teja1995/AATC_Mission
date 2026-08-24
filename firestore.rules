@@ -129,6 +129,16 @@ service cloud.firestore {
         || (isCrew() && !isDisplay() && resource.data.uid == request.auth.uid);
     }
 
+    // What the crew has identified by barcode. Reference data, not personal
+    // data: the food database is thin on Polish shelf products and knows
+    // nothing about repacked rations, so the first person to name one teaches
+    // it to everybody. Any crew member may add or improve an entry; the
+    // display, which cannot log food, cannot write here either.
+    match /foodItems/{barcode} {
+      allow read: if isCrew();
+      allow write: if isCrew() && !isDisplay();
+    }
+
     match /completions/{docId} {
       allow read: if isCrew();
       allow create: if filedBySelf();

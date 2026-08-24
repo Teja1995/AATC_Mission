@@ -18,7 +18,7 @@ import {
   updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=15";
+import { firebaseConfig } from "./firebase-config.js?v=16";
 import {
   ACTIVE_DAY_DOC,
   ASSIGN_ALL,
@@ -37,7 +37,7 @@ import {
   sessionItems as sessionItemsFor,
   utcString,
   visibleTests,
-} from "./mission.js?v=15";
+} from "./mission.js?v=16";
 
 // Armstrong urine colour scale. The swatches on screen carry these colours so
 // the crew matches a colour to a colour, not a colour to a number — the printed
@@ -1112,6 +1112,71 @@ function recomputeFoodTotal() {
   $("food-total").value = Math.round(per100 * grams / 100);
 }
 
+// Only the network call is guarded. Wrapping the form updates too would let a
+// local mistake report itself as "could not reach the database", which sends
+// the operator to check the wifi over a bug in this file.
+async function fetchProduct(barcode) {
+  const url = `${OFF_ENDPOINT}${encodeURIComponent(barcode)}.json`
+    + "?fields=product_name,brands,nutriments,quantity";
+
+  // Without this a stalled request looks like a frozen form for as long as the
+  // browser feels like waiting.
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    // Open Food Facts answers an unknown barcode with 404, not with a body
+    // saying so. Most Polish shelf products are not in it, so this is the
+    // ordinary case, not a failure.
+    if (response.status === 404) return { status: 0 };
+    if (!response.ok) {
+      const error = new Error(`the food database answered ${response.status}`);
+      error.reachable = true;
+      throw error;
+    }
+    return await response.json();
+  } catch (error) {
+    if (error.reachable) throw error;
+    if (error.name === "AbortError") {
+      throw new Error("the food database did not answer within 12 seconds");
+    }
+    // A blocked host, no DNS, captive portal or no connection all land here as
+    // the same opaque TypeError, so say what is actually known.
+    throw new Error(`could not reach the food database (${error.name}: ${error.message})`);
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+// Anything the crew has already identified once. Open Food Facts is thin on
+// Polish shelf products and knows nothing about a habitat's repacked rations,
+// so the first person to type a barcode in teaches it to everybody.
+async function lookupCatalogue(barcode) {
+  try {
+    const snapshot = await getDoc(doc(db, "foodItems", barcode));
+    return snapshot.exists() ? snapshot.data() : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function rememberFood(barcode, productName, kcalPer100g) {
+  if (!barcode || !productName) return;
+  try {
+    await setDoc(doc(db, "foodItems", barcode), {
+      barcode,
+      productName,
+      kcalPer100g: kcalPer100g ?? null,
+      addedBy: state.profile.crewCode,
+      addedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (error) {
+    // Saving to the shared list is a convenience for the next person. The
+    // crew member's own entry is already filed; never fail their log over it.
+  }
+}
+
 async function lookupBarcode(code) {
   const barcode = String(code || foodField("food-barcode")).replace(/\D/g, "");
   if (!barcode) {
@@ -1121,40 +1186,70 @@ async function lookupBarcode(code) {
 
   $("food-barcode").value = barcode;
   $("food-error").textContent = "";
+  $("food-lookup-btn").disabled = true;
   $("food-scan-hint").textContent = "Looking up...";
 
-  try {
-    const url = `${OFF_ENDPOINT}${encodeURIComponent(barcode)}.json`
-      + "?fields=product_name,brands,nutriments,quantity";
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`lookup returned ${response.status}`);
-    const data = await response.json();
-
-    if (data.status !== 1 || !data.product) {
-      // Not an error: an analog habitat repacks most of its food. Fill the rest
-      // in by hand and the entry counts the same.
-      $("food-scan-hint").textContent = "Not in the food database. Type the name and the energy yourself.";
-      $("food-name").focus();
-      return;
-    }
-
-    const product = data.product;
-    const name = [product.product_name, product.brands].filter(Boolean).join(" - ");
-    const per100 = Number(product.nutriments?.["energy-kcal_100g"]);
-
-    $("food-name").value = name || `Barcode ${barcode}`;
-    if (Number.isFinite(per100) && per100 > 0) {
-      $("food-kcal100").value = per100;
-      $("food-scan-hint").textContent = `${name} · ${per100} kcal per 100 g. Enter how much was eaten.`;
-      $("food-grams").focus();
-    } else {
-      $("food-scan-hint").textContent = `${name} - the database has no kcal figure. Type the energy yourself.`;
-      $("food-total").focus();
-    }
+  const known = await lookupCatalogue(barcode);
+  if (known) {
+    $("food-name").value = known.productName || "";
+    if (known.kcalPer100g) $("food-kcal100").value = known.kcalPer100g;
+    $("food-scan-hint").textContent = known.kcalPer100g
+      ? `${known.productName} - ${known.kcalPer100g} kcal per 100 g, from the crew list (added by ${known.addedBy}). Enter how much was eaten.`
+      : `${known.productName}, from the crew list. Type the energy.`;
+    $("food-lookup-btn").disabled = false;
+    $("food-grams").focus();
     recomputeFoodTotal();
-  } catch (error) {
-    $("food-scan-hint").textContent = "Could not reach the food database. Type the name and energy yourself.";
+    return;
   }
+
+  let data;
+  try {
+    data = await fetchProduct(barcode);
+  } catch (error) {
+    $("food-scan-hint").textContent = `${error.message}. Type the name and energy yourself.`;
+    $("food-name").focus();
+    return;
+  } finally {
+    $("food-lookup-btn").disabled = false;
+  }
+
+  if (data.status !== 1 || !data.product) {
+    // Not an error: an analog habitat repacks most of its food. Fill the rest
+    // in by hand and the entry counts the same.
+    $("food-scan-hint").textContent = `Barcode ${barcode} is not in the food database. Type the name and energy - it will be saved for the whole crew.`;
+    $("food-name").focus();
+    return;
+  }
+
+  const product = data.product;
+  const name = [product.product_name, product.brands].filter(Boolean).join(" - ");
+  const nutriments = product.nutriments || {};
+  const per100 = Number(nutriments["energy-kcal_100g"]);
+
+  $("food-name").value = name || `Barcode ${barcode}`;
+
+  if (Number.isFinite(per100) && per100 > 0) {
+    $("food-kcal100").value = per100;
+    $("food-scan-hint").textContent = `${name} - ${per100} kcal per 100 g. Enter how much was eaten.`;
+    $("food-grams").focus();
+    recomputeFoodTotal();
+    return;
+  }
+
+  // Some products carry only kilojoules. A conversion is better than nothing,
+  // and it is marked so nobody mistakes it for a measured figure.
+  const kj100 = Number(nutriments["energy-kj_100g"] ?? nutriments["energy_100g"]);
+  if (Number.isFinite(kj100) && kj100 > 0) {
+    const converted = Math.round(kj100 / 4.184);
+    $("food-kcal100").value = converted;
+    $("food-scan-hint").textContent = `${name} - ${converted} kcal per 100 g, converted from ${kj100} kJ. Enter how much was eaten.`;
+    $("food-grams").focus();
+    recomputeFoodTotal();
+    return;
+  }
+
+  $("food-scan-hint").textContent = `${name} - the database has no energy figure. Type it yourself.`;
+  $("food-total").focus();
 }
 
 // Camera scanning uses the browser's own BarcodeDetector where it exists
@@ -1325,6 +1420,7 @@ async function submitFood(event) {
   writeOutbox(OUTBOXES.food, [...readOutbox(OUTBOXES.food), entry]);
   closeFoodModal();
   await flushOutbox(OUTBOXES.food, { announce: true });
+  await rememberFood(entry.payload.barcode, productName, entry.payload.kcalPer100g);
 }
 
 async function deleteMeal(id, entry) {

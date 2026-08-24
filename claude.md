@@ -586,6 +586,13 @@ is looked up in Open Food Facts, which is free, needs no key and answers with a
 permissive CORS header. It fills in the product name and kcal per 100 g; grams
 eaten gives the total.
 
+Lookups consult the **crew's own list** (`/foodItems/{barcode}`) before the
+internet. Open Food Facts is thin on Polish shelf products -- three of five real
+Polish barcodes tested were absent -- and knows nothing about repacked habitat
+rations, so the first person to name a barcode teaches it to everyone and no
+one types it twice. An unknown barcode returns HTTP 404 from that API, which is
+the ordinary case here and must not be reported as a network failure.
+
 **Total kcal is the measure.** Everything else is a way of arriving at it, and
 all of it stays editable. A barcode is never required: an analog habitat repacks
 most of its food, so a hand-typed name and energy is a first-class entry,
